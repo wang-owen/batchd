@@ -16,7 +16,7 @@ project(
 inc = include_directories('include')
 
 loopnet_sources = files(
-  # 'src/event_loop.cpp',
+  'src/fd_util.cc',
 )
 
 loopnet_lib = static_library(
