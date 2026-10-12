@@ -36,9 +36,11 @@ loopnet_dep = declare_dependency(
   link_with: loopnet_lib,
 )
 
-if get_option('examples')
-  subdir('examples')
-endif
+executable(
+  'loopnet_server',
+  'src/main.cc',
+  dependencies: loopnet_dep,
+)
 
 if get_option('tests')
   subdir('tests')
