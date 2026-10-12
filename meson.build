@@ -21,6 +21,7 @@ loopnet_sources = files(
   'src/event_loop.cc',
   'src/fd_util.cc',
   'src/poller.cc',
+  'src/tcp_connection.cc',
 )
 
 loopnet_lib = static_library(
