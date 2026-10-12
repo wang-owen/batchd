@@ -16,6 +16,7 @@ project(
 inc = include_directories('include')
 
 loopnet_sources = files(
+  'src/acceptor.cc',
   'src/buffer.cc',
   'src/event_loop.cc',
   'src/fd_util.cc',
