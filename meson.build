@@ -17,7 +17,9 @@ inc = include_directories('include')
 
 loopnet_sources = files(
   'src/buffer.cc',
+  'src/event_loop.cc',
   'src/fd_util.cc',
+  'src/poller.cc',
 )
 
 loopnet_lib = static_library(
