@@ -3,10 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
+#include <utility>
 
 namespace inference_srv {
 
@@ -27,9 +26,11 @@ BatchingQueue::~BatchingQueue() {
   worker_thread_.join();
 }
 
-void BatchingQueue::submit(Request request, ResponseCallback on_response) {
+void BatchingQueue::submit(Request request) {
+  // BUG: pending_ is unbounded, so a flood of requests grows memory and
+  // queueing latency without limit
   std::lock_guard<std::mutex> lock{mtx_};
-  pending_.emplace_back(std::move(request), std::move(on_response));
+  pending_.emplace_back(std::move(request));
   cv_.notify_one();
 }
 
@@ -64,21 +65,11 @@ void BatchingQueue::worker_loop() {
     pending_requests.reserve(len);
     std::vector<Request> batch;
     batch.reserve(len);
-    std::vector<Response> responses;
     for (std::size_t i = 0; i < len; ++i) {
       batch.push_back(std::move(pending_requests[i].request));
     }
 
-    handler_(batch, responses);
-
-    std::unordered_map<std::uint64_t, Response &> response_map;
-    for (auto &response : responses) {
-      response_map.emplace(response.id, response);
-    }
-
-    for (std::size_t i = 0; i < len; ++i) {
-      pending_requests[i].on_response(response_map.at(batch[i].id));
-    }
+    handler_(std::move(batch));
   }
 }
 

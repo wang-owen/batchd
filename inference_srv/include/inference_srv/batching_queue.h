@@ -17,31 +17,27 @@ namespace inference_srv {
 
 using Clock = std::chrono::steady_clock;
 
-using BatchHandler = std::function<void(const std::vector<Request> &batch,
-                                        std::vector<Response> &out_responses)>;
+using BatchHandler = std::function<void(std::vector<Request> batch)>;
 
 // Accumulates submitted requests until either `max_batch_size` requests
 // have arrived or `max_wait` has elapsed since the first request in the
-// current batch, then hands the whole batch to `handler` and routes each
-// Response back to its caller via the callback passed to submit().
+// current batch, then hands the whole batch to `handler` on the worker
+// thread. Producing and delivering responses is up to the handler.
 class BatchingQueue {
 public:
-  using ResponseCallback = std::function<void(Response)>;
-
   BatchingQueue(std::size_t max_batch_size, std::chrono::milliseconds max_wait,
                 BatchHandler handler);
   ~BatchingQueue();
   BatchingQueue(const BatchingQueue &) = delete;
   BatchingQueue &operator=(const BatchingQueue &) = delete;
 
-  void submit(Request request, ResponseCallback on_response);
+  void submit(Request request);
 
   std::uint64_t get_id() { return counter_++; }
 
 private:
   struct PendingRequest {
     Request request;
-    ResponseCallback on_response;
     std::chrono::time_point<Clock> enqueue_time = Clock::now();
   };
 
