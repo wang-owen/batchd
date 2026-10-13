@@ -18,12 +18,12 @@ Every component follows the same shape:
 
     <component>/
       include/<component>/   public headers, #include "<component>/..."
-      src/                    implementation
-      main.cc                thin demo/server executable
-      tests/                   Catch2 suite
-      benchmarks/              Catch2 benchmarks (run via `meson test --benchmark`)
+      src/                   implementation
+      main.cc                server executable (minicache, inference_srv only)
+      tests/                 Catch2 suite
+      benchmarks/            Catch2 benchmarks (run via `meson test --benchmark`)
       meson.build
-      README.md                architecture and component overview
+      README.md              architecture and component overview
 
 ## Build
 
