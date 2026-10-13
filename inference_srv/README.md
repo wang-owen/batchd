@@ -14,8 +14,8 @@ worker thread. Networking is a
   handing it to the handler, and `SIGINT` exits immediately, so in-flight
   clients never receive a reply.
 - loopnet can't close a connection from the server side, so an oversized
-  unterminated request is discarded with `ERR request too large` rather
-  than disconnecting the client.
+  unterminated request is discarded with `ERR <client_id> request too large`
+  rather than disconnecting the client.
 
 ## Why batching helps
 
@@ -45,7 +45,8 @@ divided further.
       |                            | requests out, release lock    |
       |                            |                               |
       |                            |-- handler_(batch) ----------->|
-      |                            |   (pool.submit)               |
+      |                            |   (in_flight_slots.acquire(), |
+      |                            |    then pool.submit)          |
       |                            |                               | InferenceEngine::run_batch()
       |                            |                               |   - batch_arena_.reset()
       |                            |                               |   - copy inputs into arena
@@ -54,6 +55,7 @@ divided further.
       |                            |                               |
       |<-- queue_task(send "OK ...") per response -----------------|
       |    (or "ERR engine failure" per request if run_batch threw)|
+      |                            |                               | in_flight_slots.release()
 ```
 
 Two independent conditions can trigger a flush, whichever comes first:
@@ -68,16 +70,31 @@ Two independent conditions can trigger a flush, whichever comes first:
 splits complete `\n`-terminated lines out of the connection's buffer:
 
     request:  INFER <client_id> <f1> <f2> ... <fn>\n
-    response: OK <client_id> <o1> ... <on>\n   or   ERR <reason>\n
+    response: OK <client_id> <o1> ... <on>\n   or   ERR <client_id> <reason>\n
 
-Malformed lines get `ERR invalid request` and lines over 64 KiB get
-`ERR request too large`, both sent immediately. Valid lines become a
-`Request` tagged with a server-assigned id (`BatchingQueue::get_id()`) and
-are `submit()`ted without blocking.
+Malformed lines get `ERR <client_id> invalid request` and lines over
+64 KiB get `ERR <client_id> request too large`, both sent immediately.
+Once 440 requests are already waiting in `BatchingQueue`, `submit()`
+returns false and the new request gets `ERR <client_id> busy` instead.
+An `ERR` echoes the line's second token as `<client_id>` if it parses as
+one, or `-` otherwise. Valid lines become a `Request` tagged with a
+server-assigned id (`BatchingQueue::get_id()`) and are `submit()`ted
+without blocking.
 
-The batch handler runs on the queue's worker thread and only hands the
-batch to a `threadpool::ThreadPool`, so the queue keeps accumulating the
-next batch while earlier ones are computed. Each pool thread owns a
+The batch handler runs on the queue's worker thread. It takes one of
+`num_workers` permits from a `std::counting_semaphore` (`in_flight_slots`)
+and hands the batch to a `threadpool::ThreadPool`; the task gives the
+permit back when it finishes, so at most one batch per pool thread is in
+flight. While a thread is free, the queue keeps accumulating the next batch
+as earlier ones are computed. Once every thread is busy, the handler blocks
+and the backlog waits in `pending_`, which is FIFO, instead of in the
+pool's per-worker deques, whose owners pop newest-first. Requests are
+therefore served oldest-first under load, and because the waiting ones have
+already passed `max_wait_`, later flushes are full batches. The permit is
+returned by a `SlotRelease` guard constructed inside the task body rather
+than captured: `std::function` requires a copyable lambda, and a copyable
+guard (e.g. one held by `shared_ptr`) would tie the release to the last
+copy's lifetime instead of to the end of the batch. Each pool thread owns a
 `thread_local InferenceEngine` (and so its own arena). `TcpConnection` may
 only be touched from the loop thread, so results go back through
 `EventLoop::queue_task()`. Each `Request`/`Response` holds its connection
