@@ -1,7 +1,5 @@
 #include "inference_srv/inference_engine.h"
 
-#include <unistd.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -15,7 +13,8 @@ namespace {
 
 constexpr std::size_t kBatchArenaBytes = 4 * 1024 * 1024;
 
-constexpr auto kFixedOverheadPerBatch = std::chrono::milliseconds(5);
+constexpr std::chrono::milliseconds kBatchOverhead =
+    std::chrono::milliseconds(5);
 
 } // namespace
 
@@ -37,7 +36,8 @@ void InferenceEngine::run_batch(const std::vector<Request> &batch,
     float *buf = static_cast<float *>(ptr);
     std::copy(req.input.begin(), req.input.end(), buf);
 
-    Response response = {.id = req.id, .client_id = req.client_id};
+    Response response = {
+        .id = req.id, .client_id = req.client_id, .conn = req.conn};
     response.output.resize(req.input.size());
 
     // Scale by 2.0 as stand-in
@@ -49,7 +49,7 @@ void InferenceEngine::run_batch(const std::vector<Request> &batch,
   }
 
   // Simulate model latency
-  std::this_thread::sleep_for(kFixedOverheadPerBatch +
+  std::this_thread::sleep_for(kBatchOverhead +
                               std::chrono::milliseconds(batch.size()));
 }
 

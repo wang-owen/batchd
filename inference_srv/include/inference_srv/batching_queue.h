@@ -11,21 +11,11 @@
 #include <thread>
 #include <vector>
 
+#include "inference_srv/request.h"
+
 namespace inference_srv {
 
 using Clock = std::chrono::steady_clock;
-
-struct Request {
-  std::uint64_t id;
-  std::uint64_t client_id;
-  std::vector<float> input;
-};
-
-struct Response {
-  std::uint64_t id;
-  std::uint64_t client_id;
-  std::vector<float> output;
-};
 
 using BatchHandler = std::function<void(const std::vector<Request> &batch,
                                         std::vector<Response> &out_responses)>;

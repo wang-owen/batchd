@@ -3,7 +3,7 @@
 #include <vector>
 
 #include "allocator/arena_allocator.h"
-#include "inference_srv/batching_queue.h"
+#include "inference_srv/request.h"
 
 namespace inference_srv {
 

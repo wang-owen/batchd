@@ -17,7 +17,7 @@ std::vector<inference_srv::Request> make_requests(int count) {
   std::vector<inference_srv::Request> requests;
   requests.reserve(count);
   for (std::uint64_t i = 0; i < count; ++i) {
-    requests.push_back({i, i, {1.0f, 2.0f, 3.0f}});
+    requests.push_back({.id = i, .input = {1.0f, 2.0f, 3.0f}});
   }
   return requests;
 }
