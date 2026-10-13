@@ -18,25 +18,25 @@ void invoke_task(Task &task) noexcept { task(); }
 } // namespace
 
 void WorkStealingDeque::push(Task task) {
-  std::lock_guard<std::mutex> lock(mtx);
-  dq.push_back(std::move(task));
-};
+  std::lock_guard<std::mutex> lock(mtx_);
+  dq_.push_back(std::move(task));
+}
 
 bool WorkStealingDeque::try_pop(Task &task) {
-  std::lock_guard<std::mutex> lock(mtx);
-  if (dq.empty())
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (dq_.empty())
     return false;
-  task = std::move(dq.back());
-  dq.pop_back();
+  task = std::move(dq_.back());
+  dq_.pop_back();
   return true;
 }
 
 bool WorkStealingDeque::try_steal(Task &task) {
-  std::lock_guard<std::mutex> lock(mtx);
-  if (dq.empty())
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (dq_.empty())
     return false;
-  task = std::move(dq.front());
-  dq.pop_front();
+  task = std::move(dq_.front());
+  dq_.pop_front();
   return true;
 }
 

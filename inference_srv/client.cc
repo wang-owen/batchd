@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <string>

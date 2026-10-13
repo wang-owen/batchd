@@ -25,8 +25,8 @@ public:
   bool try_steal(Task &task);
 
 private:
-  std::deque<Task> dq;
-  mutable std::mutex mtx;
+  std::deque<Task> dq_;
+  mutable std::mutex mtx_;
 };
 
 struct Worker {
