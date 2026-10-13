@@ -14,6 +14,9 @@ using inference_srv::Request;
 
 namespace {
 
+// Comfortably above what any test submits, except the cap test itself.
+constexpr std::size_t kMaxPending = 64;
+
 // Thread-safe recorder for batches handed to the handler on the queue's
 // worker thread. Tests block on wait_for_at_least() instead of sleeping a
 // fixed amount, since submit() is fire-and-forget.
@@ -53,7 +56,7 @@ private:
 } // namespace
 
 TEST_CASE("ConstructsAndDestructsCleanly", "[batching_queue]") {
-  BatchingQueue queue(8, std::chrono::milliseconds(5),
+  BatchingQueue queue(8, std::chrono::milliseconds(5), kMaxPending,
                       [](const std::vector<Request> &) {});
   SUCCEED();
 }
@@ -63,9 +66,10 @@ TEST_CASE("FullBatchTriggersBeforeMaxWaitElapses", "[batching_queue]") {
   constexpr auto kMaxWait = std::chrono::milliseconds(500);
   BatchCollector collector;
 
-  BatchingQueue queue(kBatchSize, kMaxWait, collector.handler());
+  BatchingQueue queue(kBatchSize, kMaxWait, kMaxPending, collector.handler());
   for (std::uint64_t id = 0; id < kBatchSize; ++id) {
-    queue.submit(Request{.id = id, .input = {static_cast<float>(id)}});
+    REQUIRE(
+        queue.submit(Request{.id = id, .input = {static_cast<float>(id)}}));
   }
 
   // If this only fired via the max_wait timeout, it wouldn't arrive for
@@ -79,9 +83,9 @@ TEST_CASE("PartialBatchFlushesAfterMaxWait", "[batching_queue]") {
   constexpr auto kMaxWait = std::chrono::milliseconds(20);
   BatchCollector collector;
 
-  BatchingQueue queue(kBatchSize, kMaxWait, collector.handler());
-  queue.submit(Request{.id = 1, .input = {1.0f}});
-  queue.submit(Request{.id = 2, .input = {2.0f}});
+  BatchingQueue queue(kBatchSize, kMaxWait, kMaxPending, collector.handler());
+  REQUIRE(queue.submit(Request{.id = 1, .input = {1.0f}}));
+  REQUIRE(queue.submit(Request{.id = 2, .input = {2.0f}}));
 
   // Only 2 of the required 8 requests were submitted, so this can only
   // succeed via the max_wait timeout path, not the batch-size path.
@@ -97,9 +101,10 @@ TEST_CASE("DeliversRequestsToHandlerInSubmissionOrder", "[batching_queue]") {
   constexpr auto kMaxWait = std::chrono::milliseconds(500);
   BatchCollector collector;
 
-  BatchingQueue queue(kBatchSize, kMaxWait, collector.handler());
+  BatchingQueue queue(kBatchSize, kMaxWait, kMaxPending, collector.handler());
   for (std::uint64_t id = 0; id < kTotal; ++id) {
-    queue.submit(Request{.id = id, .input = {static_cast<float>(id)}});
+    REQUIRE(
+        queue.submit(Request{.id = id, .input = {static_cast<float>(id)}}));
   }
 
   REQUIRE(collector.wait_for_at_least(kTotal, std::chrono::milliseconds(500)));
@@ -111,4 +116,24 @@ TEST_CASE("DeliversRequestsToHandlerInSubmissionOrder", "[batching_queue]") {
     }
   }
   CHECK(expected_id == kTotal);
+}
+
+TEST_CASE("RejectsSubmitsBeyondMaxPending", "[batching_queue]") {
+  // The cap is below the batch size and max_wait is long, so nothing leaves
+  // pending_ while the test submits.
+  constexpr std::size_t kBatchSize = 8;
+  constexpr std::size_t kCap = 2;
+  constexpr auto kMaxWait = std::chrono::milliseconds(500);
+  BatchCollector collector;
+
+  BatchingQueue queue(kBatchSize, kMaxWait, kCap, collector.handler());
+  REQUIRE(queue.submit(Request{.id = 1, .input = {1.0f}}));
+  REQUIRE(queue.submit(Request{.id = 2, .input = {2.0f}}));
+  CHECK_FALSE(queue.submit(Request{.id = 3, .input = {3.0f}}));
+
+  // Only the accepted requests are flushed once max_wait elapses.
+  REQUIRE(collector.wait_for_at_least(kCap, std::chrono::seconds(2)));
+  auto batches = collector.snapshot();
+  REQUIRE(batches.size() == 1u);
+  CHECK(batches[0].size() == kCap);
 }

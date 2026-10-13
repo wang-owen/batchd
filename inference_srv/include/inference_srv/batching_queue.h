@@ -23,15 +23,18 @@ using BatchHandler = std::function<void(std::vector<Request> batch)>;
 // have arrived or `max_wait` has elapsed since the first request in the
 // current batch, then hands the whole batch to `handler` on the worker
 // thread. Producing and delivering responses is up to the handler.
+// At most `max_pending` requests wait at once; submit() rejects the rest.
 class BatchingQueue {
 public:
   BatchingQueue(std::size_t max_batch_size, std::chrono::milliseconds max_wait,
-                BatchHandler handler);
+                std::size_t max_pending, BatchHandler handler);
   ~BatchingQueue();
   BatchingQueue(const BatchingQueue &) = delete;
   BatchingQueue &operator=(const BatchingQueue &) = delete;
 
-  void submit(Request request);
+  // Returns false, dropping `request`, if `max_pending` requests are
+  // already waiting.
+  [[nodiscard]] bool submit(Request request);
 
   std::uint64_t get_id() { return counter_++; }
 
@@ -45,6 +48,7 @@ private:
 
   std::size_t max_batch_size_;
   std::chrono::milliseconds max_wait_;
+  std::size_t max_pending_;
   BatchHandler handler_;
 
   std::mutex mtx_;

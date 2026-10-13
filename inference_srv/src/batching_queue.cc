@@ -11,9 +11,9 @@ namespace inference_srv {
 
 BatchingQueue::BatchingQueue(std::size_t max_batch_size,
                              std::chrono::milliseconds max_wait,
-                             BatchHandler handler)
+                             std::size_t max_pending, BatchHandler handler)
     : max_batch_size_(max_batch_size), max_wait_(max_wait),
-      handler_(std::move(handler)) {
+      max_pending_(max_pending), handler_(std::move(handler)) {
   worker_thread_ = std::thread{[this] { worker_loop(); }};
 }
 
@@ -26,12 +26,14 @@ BatchingQueue::~BatchingQueue() {
   worker_thread_.join();
 }
 
-void BatchingQueue::submit(Request request) {
-  // BUG: pending_ is unbounded, so a flood of requests grows memory and
-  // queueing latency without limit
+bool BatchingQueue::submit(Request request) {
   std::lock_guard<std::mutex> lock{mtx_};
+  if (pending_.size() >= max_pending_) {
+    return false;
+  }
   pending_.emplace_back(std::move(request));
   cv_.notify_one();
+  return true;
 }
 
 void BatchingQueue::worker_loop() {

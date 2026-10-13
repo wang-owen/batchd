@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -39,11 +40,13 @@ std::size_t run_naive(inference_srv::InferenceEngine &engine,
 // Batched: submits requests through one long-lived BatchingQueue and waits
 // for every response, letting the queue group them by max_batch_size/max_wait.
 // The queue outlives each timed run so its thread startup and shutdown aren't
-// measured.
+// measured. `max_pending` must cover a whole run, since every request is
+// submitted before any response is awaited.
 class BatchedRunner {
 public:
-  BatchedRunner(std::size_t max_batch_size, std::chrono::milliseconds max_wait)
-      : queue_(max_batch_size, max_wait,
+  BatchedRunner(std::size_t max_batch_size, std::chrono::milliseconds max_wait,
+                std::size_t max_pending)
+      : queue_(max_batch_size, max_wait, max_pending,
                [this](const std::vector<inference_srv::Request> &batch) {
                  engine_.run_batch(batch, responses_);
                  std::lock_guard<std::mutex> lock(mtx_);
@@ -57,7 +60,9 @@ public:
       received_ = 0;
     }
     for (const auto &req : requests) {
-      queue_.submit(req);
+      if (!queue_.submit(req)) {
+        throw std::runtime_error("BatchingQueue rejected a request");
+      }
     }
     std::unique_lock<std::mutex> lock(mtx_);
     cv_.wait(lock, [&] { return received_ >= requests.size(); });
@@ -85,6 +90,7 @@ TEST_CASE("inference_srv throughput: naive (one-at-a-time) vs batched",
   inference_srv::InferenceEngine engine;
   BENCHMARK("naive" + suffix) { return run_naive(engine, requests); };
 
-  BatchedRunner batched(/*max_batch_size=*/32, std::chrono::milliseconds(10));
+  BatchedRunner batched(/*max_batch_size=*/32, std::chrono::milliseconds(10),
+                        /*max_pending=*/count);
   BENCHMARK("batched" + suffix) { return batched.run(requests); };
 }

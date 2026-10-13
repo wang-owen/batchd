@@ -45,6 +45,7 @@ int main() {
   constexpr std::string_view kBindAddress = "127.0.0.1";
   constexpr std::uint16_t kPort = 9091;
   constexpr std::size_t kMaxBatchSize = 4;
+  constexpr std::size_t kMaxPendingRequests = 440;
   constexpr std::size_t kMaxLineBytes = 64 * 1024;
   constexpr std::chrono::milliseconds kMaxWaitMs =
       std::chrono::milliseconds(50);
@@ -56,7 +57,7 @@ int main() {
   threadpool::ThreadPool pool(
       std::max(2u, std::thread::hardware_concurrency()));
   inference_srv::BatchingQueue batching_queue(
-      kMaxBatchSize, kMaxWaitMs,
+      kMaxBatchSize, kMaxWaitMs, kMaxPendingRequests,
       [&loop, &pool](std::vector<inference_srv::Request> batch) {
         // PERF: no cap on batches in flight; under overload the pool's queues
         // grow without bound and batches flush half-empty.
@@ -131,7 +132,10 @@ int main() {
         for (std::size_t i = 2; i < tokens.size(); ++i) {
           request.input.push_back(std::stof(tokens[i]));
         }
-        batching_queue.submit(std::move(request));
+
+        if (!batching_queue.submit(std::move(request))) {
+          conn->send("ERR busy\n");
+        }
       } catch (const std::exception &) {
         conn->send("ERR invalid request\n");
         continue;
