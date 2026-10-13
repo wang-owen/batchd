@@ -1,155 +1,151 @@
 # inference_srv
 
-Batching inference server: groups inference-style requests into batches
-before processing, instead of one at a time. Same idea as Triton's
-dynamic batching. Uses [`allocator`](../allocator) for each batch's input
-buffer and [`threadpool`](../threadpool) to run batches off the queue's
-worker thread. Networking is a
-[loopnet](https://github.com/wang-owen/loopnet) `TcpServer`; see
-[Serving](#serving) below.
+Batching inference server: it groups requests into batches before running
+them, in the style of Triton's dynamic batching, so a fixed per-call cost
+is paid once per batch instead of once per request. The "model" is a stub
+that doubles every input and sleeps for 5 ms + 1 ms per request in the
+batch (`InferenceEngine::batch_latency()`). Uses [`allocator`](../allocator)
+for each batch's input buffer, [`threadpool`](../threadpool) to run
+batches, and [loopnet](https://github.com/wang-owen/loopnet) for TCP.
 
-## TODO
-
-- A shutdown drops every request still pending in `BatchingQueue` without
-  handing it to the handler, and `SIGINT` exits immediately, so in-flight
-  clients never receive a reply.
-- loopnet can't close a connection from the server side, so an oversized
-  unterminated request is discarded with `ERR <client_id> request too large`
-  rather than disconnecting the client.
-
-## Why batching helps
-
-A real inference call (and this stub's cost model) pays two kinds of
-cost: a **fixed cost per call** (kernel launch, memory setup -- the same
-whether the batch holds 1 request or 100) and a **variable cost per
-item** (the actual compute, roughly linear in batch size). Processing
-requests one at a time pays the fixed cost on every single request;
-batching pays it once per batch and spreads it across every request in
-that batch. The benchmark below shows the resulting speedup growing with
-request volume, since more requests per batch means the fixed cost gets
-divided further.
-
-## Architecture: request flow
+## How it works
 
 ```
  loop thread               BatchingQueue worker            ThreadPool worker
-      |                            |                               |
-      |-- submit(request) -------->| pending_.push_back(),         |
-      |                            | notify_one()                  |
-      |                            |                               |
-      |                            | wait_until(oldest enqueue_time|
-      |                            |   + max_wait_, size >=        |
-      |                            |   max_batch_size_ || stop_)   |
-      |                            |                               |
-      |                            | move up to max_batch_size_    |
-      |                            | requests out, release lock    |
-      |                            |                               |
-      |                            |-- handler_(batch) ----------->|
-      |                            |   (in_flight_slots.acquire(), |
-      |                            |    then pool.submit)          |
-      |                            |                               | InferenceEngine::run_batch()
-      |                            |                               |   - batch_arena_.reset()
-      |                            |                               |   - copy inputs into arena
-      |                            |                               |   - stub compute (fixed +
-      |                            |                               |     per-item sleep)
-      |                            |                               |
-      |<-- queue_task(send "OK ...") per response -----------------|
-      |    (or "ERR engine failure" per request if run_batch threw)|
+      |-- submit(request) -------->| pending_.push_back()          |
+      |                            | wait until size >= max_batch  |
+      |                            |   or oldest + max_wait passed |
+      |                            | move <= max_batch requests out|
+      |                            |-- handler(batch): ----------->|
+      |                            |   in_flight_slots.acquire(),  | InferenceEngine::run_batch()
+      |                            |   pool.submit()               |   (thread_local engine/arena)
+      |<-- queue_task(send reply) per request ---------------------|
       |                            |                               | in_flight_slots.release()
 ```
 
-Two independent conditions can trigger a flush, whichever comes first:
-- **Size-triggered**: `pending_.size()` reaches `max_batch_size_`.
-- **Time-triggered**: `max_wait_` elapses since the oldest pending request
-  was enqueued, even with a partial batch -- this bounds worst-case
-  per-request latency when traffic is too sparse to fill a batch.
-
-## Serving
-
-`main.cc` runs a single `loopnet::EventLoop` thread. Its message callback
-splits complete `\n`-terminated lines out of the connection's buffer:
-
-    request:  INFER <client_id> <f1> <f2> ... <fn>\n
-    response: OK <client_id> <o1> ... <on>\n   or   ERR <client_id> <reason>\n
-
-Malformed lines get `ERR <client_id> invalid request` and lines over
-64 KiB get `ERR <client_id> request too large`, both sent immediately.
-Once 440 requests are already waiting in `BatchingQueue`, `submit()`
-returns false and the new request gets `ERR <client_id> busy` instead.
-An `ERR` echoes the line's second token as `<client_id>` if it parses as
-one, or `-` otherwise. Valid lines become a `Request` tagged with a
-server-assigned id (`BatchingQueue::get_id()`) and are `submit()`ted
-without blocking.
-
-The batch handler runs on the queue's worker thread. It takes one of
-`num_workers` permits from a `std::counting_semaphore` (`in_flight_slots`)
-and hands the batch to a `threadpool::ThreadPool`; the task gives the
-permit back when it finishes, so at most one batch per pool thread is in
-flight. While a thread is free, the queue keeps accumulating the next batch
-as earlier ones are computed. Once every thread is busy, the handler blocks
-and the backlog waits in `pending_`, which is FIFO, instead of in the
-pool's per-worker deques, whose owners pop newest-first. Requests are
-therefore served oldest-first under load, and because the waiting ones have
-already passed `max_wait_`, later flushes are full batches. The permit is
-returned by a `SlotRelease` guard constructed inside the task body rather
-than captured: `std::function` requires a copyable lambda, and a copyable
-guard (e.g. one held by `shared_ptr`) would tie the release to the last
-copy's lifetime instead of to the end of the batch. Each pool thread owns a
-`thread_local InferenceEngine` (and so its own arena). `TcpConnection` may
-only be touched from the loop thread, so results go back through
-`EventLoop::queue_task()`. Each `Request`/`Response` holds its connection
-as a `shared_ptr`; if the client has disconnected by then, `send()` is a
-no-op. A client may pipeline several requests on one connection. Replies
-are not ordered relative to each other: an `ERR` is sent right away, while
-an `OK` waits for its batch.
-
-`client.cc` is a minimal client that sends one `INFER` line to
-`127.0.0.1:9091` and prints the reply.
-
-## Layout
-    include/inference_srv/  public headers (#include "inference_srv/...")
-    src/                    implementation
-    main.cc                 server executable
-    client.cc               one-shot test client
-    tests/                  Catch2 suite
-    benchmarks/             Catch2 benchmarks (run via `meson test --benchmark`)
-
-## Components
-- `Request` / `Response` -- plain structs carrying the server-assigned
-  `id`, the client's `client_id`, the originating connection, and the
-  input/output vectors.
-- `BatchingQueue` -- producer-consumer queue (mutex + condition_variable +
-  a dedicated worker thread). `submit()` is the producer side, callable
-  from any thread; `worker_loop()` is the single consumer that decides
-  when to flush and calls the handler outside the lock.
-- `BatchHandler` -- `std::function<void(std::vector<Request>)>`, the glue
-  between the queue and whatever processes a batch. Keeps `BatchingQueue`
-  ignorant of what "processing a batch" means and lets tests inject a
-  fake handler without touching `InferenceEngine`.
-- `InferenceEngine` -- the stub "model." `run_batch()` processes a whole
-  batch at once, carving every request's input out of one 4 MiB
-  `allocator::ArenaAllocator` instead of N heap allocations, and
-  `reset()`s the arena in O(1) at the start of the next batch. Throws
+- **`BatchingQueue`** -- mutex + condition variable + one worker thread.
+  The worker flushes when `max_batch_size` requests are pending or
+  `max_wait` has passed since the oldest pending request was enqueued,
+  and calls the `BatchHandler` outside the lock. `submit()` returns false
+  once `max_pending` requests are waiting.
+- **`InferenceEngine`** -- copies each request's input into a 4 MiB
+  `ArenaAllocator` (reset at the start of every batch), produces one
+  `Response` per `Request`, then sleeps for the simulated latency. Throws
   `std::runtime_error` if a batch's inputs don't fit in the arena.
+- **`main.cc`** -- one `loopnet::EventLoop` thread, a `ThreadPool` of
+  `max(2, hardware_concurrency())` workers, and a `BatchingQueue` with
+  `max_batch_size=4`, `max_wait=50ms`, `max_pending=440`. The handler
+  takes one of `num_workers` permits from a `std::counting_semaphore`
+  before submitting the batch to the pool, and the task returns it, so at
+  most one batch per worker is in flight. Once every worker is busy the
+  backlog waits in `BatchingQueue` (FIFO) rather than the pool's deques
+  (newest-first), and later flushes are full batches. `TcpConnection` may
+  only be used on the loop thread, so replies go back through
+  `EventLoop::queue_task()`; each `Request` holds its connection as a
+  `shared_ptr`, and `send()` on a closed connection is a no-op.
 
-## Benchmark
+## Protocol
 
-`inference_bench.cc` compares naive one-at-a-time processing against
-`BatchingQueue` (`max_batch_size=32`, `max_wait=10ms`) across request
-counts, using `InferenceEngine`'s stub cost model (5ms fixed + 1ms/item):
+Listens on `127.0.0.1:9091`. One request per `\n`-terminated line:
 
-| Requests | Naive      | Batched    | Speedup |
-|---------:|-----------:|-----------:|--------:|
-|       10 |   73.36 ms |   30.59 ms |   2.40x |
-|       50 |  367.58 ms |   69.14 ms |   5.32x |
-|      200 | 1466.60 ms |  258.92 ms |   5.66x |
-|     1000 | 7371.79 ms | 1276.89 ms |   5.77x |
+    request:  INFER <client_id> <f1> <f2> ... <fn>
+    response: OK <client_id> <o1> ... <on>
+          or: ERR <client_id> <reason>
 
-(`debugoptimized`/`-O2`, AppleClang 21, Apple M1 Pro.)
+`ERR` reasons: `invalid request` (not `INFER`, no inputs, or a token that
+doesn't parse), `request too large` (a line, or unterminated input, over 64 KiB),
+`busy` (`submit()` rejected it), and `engine failure` (`run_batch()`
+threw; sent for every request in the batch). `<client_id>` in an `ERR`
+echoes the line's second token if it parses as an unsigned integer, or
+`-` otherwise. `ERR`s other than `engine failure` are sent immediately, while
+`OK`s wait for their batch, so replies on one connection can arrive out of
+order; match them by `client_id`.
 
-Speedup grows with request volume until batches are full, which is the
-signature of amortizing a fixed cost: as batches fill up, the fixed 5ms
-gets divided across more requests. The per-item 1ms can't be amortized,
-so the ratio levels off at (5 + 1) / (5/32 + 1) ≈ 5.2x with full batches
-of 32, plus whatever per-call overhead (e.g. `sleep_for` oversleeping)
-batching also saves.
+## Build and run
+
+Built by the top-level Meson project (see the [root README](../README.md)).
+
+```sh
+./build/inference_srv/inference_srv_main      # server on 127.0.0.1:9091
+./build/inference_srv/inference_srv_client    # sends one INFER line, prints the reply
+python3 inference_srv/scripts/e2e_demo.py     # protocol checks against the running server
+meson test -C build inference_srv             # unit tests
+./build/inference_srv/inference_srv_bench '[!benchmark]'  # batch-size sweep
+inference_srv/scripts/load_sweep.sh out.csv   # open-loop load sweep (about 2 minutes)
+```
+
+`e2e_demo.py` runs valid, pipelined, malformed, and oversized requests,
+clients that disconnect before their reply, and 64 concurrent clients
+(`--clients`, `--requests-per-client`), printing PASS/FAIL per check and
+exiting non-zero if any fail. `busy` replies count as valid.
+
+## Benchmarks
+
+Numbers from `debugoptimized`, AppleClang 21, Apple M1 Pro.
+
+`inference_bench` sends 200 requests through a `BatchingQueue` (which
+runs batches on its own worker thread with `max_wait=10ms`) at each max
+batch size and compares against calling `run_batch()` once per request.
+Times are the median of 5 runs. "Predicted" is the ratio of total
+`batch_latency()` with and without batching:
+
+| max_batch_size | Time       | req/s | Speedup | Predicted |
+|---------------:|-----------:|------:|--------:|----------:|
+|    naive       | 1535.32 ms |   130 |   1.00x |     1.00x |
+|              1 | 1562.39 ms |   128 |   0.98x |     1.00x |
+|              2 |  865.05 ms |   231 |   1.77x |     1.71x |
+|              4 |  559.31 ms |   358 |   2.75x |     2.67x |
+|              8 |  394.70 ms |   507 |   3.89x |     3.69x |
+|             16 |  313.89 ms |   637 |   4.89x |     4.53x |
+|             32 |  256.92 ms |   778 |   5.98x |     5.11x |
+|             64 |  233.96 ms |   855 |   6.56x |     5.45x |
+
+The naive run takes 1535 ms against the model's 1200 ms, so each
+`run_batch()` call costs about 1.7 ms more than modeled (mostly
+`sleep_for` oversleeping). Batching amortizes that per-call cost too,
+which is why measured speedup exceeds the prediction at large batch sizes.
+
+`load_sweep` drives a `BatchingQueue` and a `ThreadPool`, set up as in
+`main.cc` but without networking, at a fixed offered rate (open loop) and
+reports achieved throughput, p50/p99 latency from each request's scheduled
+send time, and mean batch size:
+
+    ./build/inference_srv/load_sweep --workers 4 --max-batch-size 32 \
+        --max-wait-ms 5 --rate 2000 --requests 6000 [--csv]
+
+`scripts/load_sweep.sh` runs it at 100-3000 req/s for three
+configurations with 4 workers and 3 s of offered load per point
+(`WORKERS`, `DURATION_S`, `RATES` and `LOAD_SWEEP` override). Selected
+p50 / p99 latency in ms:
+
+| Offered req/s | No batching (1, 0 ms) | Batch 32, 0 ms wait | Batch 32, 5 ms wait |
+|--------------:|----------------------:|--------------------:|--------------------:|
+|           200 |            8.5 / 13.0 |          8.5 / 12.2 |         13.2 / 19.4 |
+|           600 |            180 / 348  |          9.6 / 18.9 |         14.9 / 32.2 |
+|          1000 |          1247 / 2527  |         12.4 / 21.9 |         17.3 / 44.6 |
+|          2000 |          3951 / 8038  |         24.1 / 64.2 |         22.6 / 49.8 |
+|          3000 |          6742 / 13513 |         51.4 / 68.0 |         54.9 / 82.1 |
+
+Without batching, throughput tops out at about 540 req/s, and above that
+latency grows with the length of the run because the backlog is
+unbounded. Both batching configurations kept up with every offered rate up
+to 3000 req/s. With no wait, batches only form from backlog (mean size 1.0
+at 200 req/s, 21.9 at 3000). The 5 ms wait adds about 5 ms at low load,
+and at 2000 req/s its larger batches (11.8 vs 7.1 on average) gave lower
+latency.
+
+## Limitations
+
+- Shutdown drops every request still pending in `BatchingQueue` without
+  handing it to the handler, and `SIGINT` calls `_exit(0)`, so in-flight
+  clients never get a reply.
+- loopnet can't close a connection from the server side, so an oversized
+  line is discarded rather than disconnecting the client. Once more than
+  64 KiB is buffered without a newline, the buffer is dropped, and the rest
+  of that line is later parsed as a new line, giving an extra
+  `ERR - invalid request`.
+- Parsing uses `std::stoull`/`std::stof`, which accept a valid prefix:
+  `1.5x` is read as 1.5, `12abc` as client id 12, `-1` wraps to
+  18446744073709551615, and `nan`/`inf` are accepted as inputs.
+- Port, batch size, max wait and queue cap are compile-time constants in
+  `main.cc`.
