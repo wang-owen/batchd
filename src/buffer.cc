@@ -21,6 +21,7 @@ std::string Buffer::retrieve(std::size_t len) {
     read_ = 0;
     write_ = 0;
   }
+
   return data;
 }
 
@@ -34,8 +35,10 @@ void Buffer::consume(std::size_t len) {
 }
 
 void Buffer::ensure_writable(std::size_t len) {
-  if (writable_bytes() >= len)
+  if (writable_bytes() >= len) {
     return;
+  }
+
   if (read_ + writable_bytes() >= len) {
     // compact: move readable bytes to the front
     std::copy(buffer_.begin() + read_, buffer_.begin() + write_,

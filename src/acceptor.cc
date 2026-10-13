@@ -26,6 +26,7 @@ int create_listener(const std::string &bind_address, std::uint16_t port) {
   sockaddr_in server_address{};
   server_address.sin_family = AF_INET;
   server_address.sin_port = htons(port);
+
   if (bind_address.empty()) {
     server_address.sin_addr.s_addr = htonl(INADDR_ANY);
   } else if (::inet_pton(AF_INET, bind_address.c_str(),
@@ -34,11 +35,13 @@ int create_listener(const std::string &bind_address, std::uint16_t port) {
   }
 
   int listener = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (listener == -1)
+  if (listener == -1) {
     throw std::system_error(errno, std::system_category(), "::socket");
+  }
 
-  if (::fcntl(listener, F_SETFD, FD_CLOEXEC) == -1)
+  if (::fcntl(listener, F_SETFD, FD_CLOEXEC) == -1) {
     close_and_throw(listener, "::fcntl");
+  }
 
   try {
     fd_util::set_nonblocking(listener);
@@ -48,15 +51,19 @@ int create_listener(const std::string &bind_address, std::uint16_t port) {
   }
 
   int one = 1;
-  if (::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1)
+  if (::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) ==
+      -1) {
     close_and_throw(listener, "::setsockopt");
+  }
 
   if (::bind(listener, reinterpret_cast<sockaddr *>(&server_address),
-             sizeof(server_address)) == -1)
+             sizeof(server_address)) == -1) {
     close_and_throw(listener, "::bind");
+  }
 
-  if (::listen(listener, SOMAXCONN) == -1)
+  if (::listen(listener, SOMAXCONN) == -1) {
     close_and_throw(listener, "::listen");
+  }
 
   return listener;
 }
@@ -68,8 +75,9 @@ Acceptor::Acceptor(EventLoop &loop, const std::string &bind_address,
     : loop_{loop}, listener_fd_{create_listener(bind_address, port)},
       channel_{loop, listener_fd_} {
   idle_fd_ = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
-  if (idle_fd_ == -1)
+  if (idle_fd_ == -1) {
     close_and_throw(listener_fd_, "::open");
+  }
 }
 
 Acceptor::~Acceptor() {
@@ -90,6 +98,7 @@ void Acceptor::handle_read() {
         ::close(client_fd);
         continue;
       }
+
       cb_(client_fd);
       continue;
     }
@@ -113,11 +122,15 @@ void Acceptor::handle_read() {
       // the connection, then reclaim the spare.
       ::close(idle_fd_);
       idle_fd_ = ::accept(listener_fd_, nullptr, nullptr);
-      if (idle_fd_ != -1)
+      if (idle_fd_ != -1) {
         ::close(idle_fd_);
+      }
+
       idle_fd_ = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
-      if (idle_fd_ == -1)
+      if (idle_fd_ == -1) {
         return;
+      }
+
       continue;
     default:
       perror("::accept");

@@ -16,23 +16,28 @@ TcpConnection::TcpConnection(EventLoop &loop, int client_fd)
   channel_.set_read_callback([this] { handle_read(); });
   channel_.set_write_callback([this] { handle_write(); });
   channel_.set_close_callback([this] {
-    if (!closed_)
+    if (!closed_) {
       handle_close();
+    }
   });
 }
 
 TcpConnection::~TcpConnection() { ::close(channel_.fd()); }
 
 void TcpConnection::send(std::string_view msg) {
-  if (closed_)
+  if (closed_) {
     return;
+  }
+
   out_buffer_.append(msg);
   channel_.enable_writing();
 }
 
 void TcpConnection::handle_read() {
-  if (closed_)
+  if (closed_) {
     return;
+  }
+
   char buffer[kBufferSize];
   ssize_t bytes_received = ::recv(channel_.fd(), buffer, sizeof(buffer), 0);
   if (bytes_received > 0) {
@@ -41,34 +46,40 @@ void TcpConnection::handle_read() {
   } else if (bytes_received == 0) {
     // peer finished sending (half-close); flush pending output before closing
     read_closed_ = true;
-    if (out_buffer_.empty())
+    if (out_buffer_.empty()) {
       handle_close();
-    else
+    } else {
       channel_.disable_reading();
+    }
   } else if (errno != EAGAIN && errno != EINTR) {
     handle_close();
   }
 }
 
 void TcpConnection::handle_write() {
-  if (closed_)
+  if (closed_) {
     return;
+  }
+
   std::string_view data = out_buffer_.peek();
   // sending to closed peer raises SIGPIPE; MSG_NOSIGNAL has it return -1
   // instead
   ssize_t bytes_sent =
       ::send(channel_.fd(), data.data(), data.size(), MSG_NOSIGNAL);
   if (bytes_sent < 0) {
-    if (errno != EAGAIN && errno != EINTR)
+    if (errno != EAGAIN && errno != EINTR) {
       handle_close();
+    }
     return;
   }
+
   out_buffer_.consume(bytes_sent);
   if (out_buffer_.empty()) {
-    if (read_closed_)
+    if (read_closed_) {
       handle_close();
-    else
+    } else {
       channel_.disable_writing();
+    }
   }
 }
 

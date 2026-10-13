@@ -17,9 +17,11 @@ public:
 
   void set_revents(int revents) { revents_ = revents; }
   void set_read_callback(EventCallback cb) { read_callback_ = std::move(cb); };
+
   void set_write_callback(EventCallback cb) {
     write_callback_ = std::move(cb);
   };
+
   void set_close_callback(EventCallback cb) {
     close_callback_ = std::move(cb);
   };
@@ -28,16 +30,21 @@ public:
     events_ |= POLLIN;
     update();
   }
+
   void enable_writing() {
-    if (events_ & POLLOUT)
+    if (events_ & POLLOUT) {
       return;
+    }
+
     events_ |= POLLOUT;
     update();
   }
+
   void disable_reading() {
     events_ &= ~POLLIN;
     update();
   }
+
   void disable_writing() {
     events_ &= ~POLLOUT;
     update();
@@ -52,11 +59,15 @@ public:
       close_callback_();
       return;
     }
+
     // without a close handler they surface through the read path instead
-    if ((revents_ & (POLLIN | POLLERR | POLLHUP)) != 0 && read_callback_)
+    if ((revents_ & (POLLIN | POLLERR | POLLHUP)) != 0 && read_callback_) {
       read_callback_();
-    if ((revents_ & POLLOUT) != 0 && write_callback_)
+    }
+
+    if ((revents_ & POLLOUT) != 0 && write_callback_) {
       write_callback_();
+    }
   }
 
   int fd() const { return fd_; }

@@ -14,12 +14,14 @@ int Poller::poll(int timeout_ms, ChannelList &active) {
     num_ready = ::poll(pollfds_.data(), pollfds_.size(), timeout_ms);
   } while (num_ready == -1 && (errno == EAGAIN || errno == EINTR));
 
-  if (num_ready == -1)
+  if (num_ready == -1) {
     return -1;
+  }
 
   for (const pollfd &pfd : pollfds_) {
-    if (pfd.revents == 0)
+    if (pfd.revents == 0) {
       continue;
+    }
 
     Channel *channel = channels_.at(pfd.fd);
     channel->set_revents(pfd.revents);
@@ -49,6 +51,7 @@ void Poller::erase_channel(Channel *channel) {
 
   int channel_fd = channel->fd();
   channels_.erase(channel_fd);
+
   auto it = std::ranges::find(pollfds_, channel_fd, &pollfd::fd);
   pollfds_.erase(it);
 }

@@ -44,11 +44,14 @@ int main() {
       continue;
     } else {
       // 0 = server closed after flushing its reply; -1 = error
-      if (bytes_received == -1)
+      if (bytes_received == -1) {
         std::cerr << "recv failed. errno: " << errno << std::endl;
+      }
+
       break;
     }
   }
+
   std::cout << std::endl;
 
   ::close(client_fd);

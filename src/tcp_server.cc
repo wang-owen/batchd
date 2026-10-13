@@ -17,25 +17,30 @@ TcpServer::TcpServer(EventLoop &loop, const std::string &bind_address,
 }
 
 TcpServer::~TcpServer() {
-  for (auto &[fd, conn] : connections_)
+  for (auto &[fd, conn] : connections_) {
     loop_.erase_channel(&conn->channel());
+  }
 }
 
 void TcpServer::handle_new_connection(int client_fd) {
   TcpConnectionPtr connection =
       std::make_shared<TcpConnection>(loop_, client_fd);
+
   connection->set_message_callback(
       [this](const TcpConnectionPtr &conn, Buffer &buffer) {
         message_callback_(conn, buffer);
       });
   connection->set_close_callback([this](const TcpConnectionPtr &conn) {
     auto node = connections_.extract(conn->channel().fd());
-    if (node.empty())
+    if (node.empty()) {
       return;
+    }
+
     loop_.erase_channel(&conn->channel());
     // task holds last reference to node
     loop_.queue_task([conn = std::move(node.mapped())] {});
   });
+
   connection->channel().enable_reading();
   connections_.emplace(client_fd, connection);
 }
