@@ -94,6 +94,49 @@ TEST_CASE("IdleWorkerStealsFromBusyWorkersQueue", "[thread_pool]") {
   release_blocked_task.store(true, std::memory_order_release);
 }
 
+TEST_CASE("SubtasksRunLifoOnSpawningWorker", "[thread_pool]") {
+  threadpool::ThreadPool pool(2);
+  std::atomic<bool> release_blocked_task{false};
+  std::atomic<int> completed{0};
+  constexpr int kChildren = 6;
+  std::thread::id parent_thread;
+  std::vector<std::thread::id> child_threads;
+  std::vector<int> order;
+
+  // Occupies worker 0 so it can't steal anything worker 1 spawns.
+  pool.submit([&release_blocked_task] {
+    while (!release_blocked_task.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  });
+
+  // Lands on worker 1. Round-robin would split the children across both
+  // deques; local submission keeps them all on worker 1's deque, so they run
+  // there in reverse spawn order.
+  threadpool::ThreadPool *pool_ptr = &pool;
+  pool.submit([&, pool_ptr] {
+    parent_thread = std::this_thread::get_id();
+    for (int i = 0; i < kChildren; ++i) {
+      pool_ptr->submit([&, i] {
+        child_threads.push_back(std::this_thread::get_id());
+        order.push_back(i);
+        completed.fetch_add(1, std::memory_order_release);
+      });
+    }
+  });
+
+  const bool all_completed = wait_until(
+      [&] { return completed.load(std::memory_order_acquire) == kChildren; },
+      std::chrono::seconds(2));
+  release_blocked_task.store(true, std::memory_order_release);
+  REQUIRE(all_completed);
+
+  CHECK(order == std::vector<int>{5, 4, 3, 2, 1, 0});
+  for (const auto &id : child_threads) {
+    CHECK(id == parent_thread);
+  }
+}
+
 TEST_CASE("SubmitDuringShutdownIsDropped", "[thread_pool]") {
   std::atomic<bool> extra_task_ran{false};
   {

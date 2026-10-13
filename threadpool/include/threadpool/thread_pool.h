@@ -49,6 +49,9 @@ public:
 
   // Tasks must handle their own exceptions. An exception escaping a task is
   // treated as a bug and calls std::terminate.
+  // Called from one of this pool's
+  // workers, the task goes on that worker's own deque; otherwise workers are
+  // picked round-robin.
   void submit(Task task);
 
   std::size_t num_workers() const { return workers_.size(); }

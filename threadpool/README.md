@@ -6,8 +6,9 @@ threads.
 ## Design
 
 Each `Worker` owns a `WorkStealingDeque` (a mutex-guarded `std::deque`).
-`submit()` hands tasks to workers round-robin and releases one permit on a
-shared `std::counting_semaphore`. A worker:
+`submit()` hands tasks from outside the pool to workers round-robin, while a
+task submitted from inside a worker goes on that worker's own deque, and
+releases one permit on a shared `std::counting_semaphore`. A worker:
 
 1. pops from the **back** of its own deque (LIFO, the most recently
    queued task);
@@ -16,7 +17,9 @@ shared `std::counting_semaphore`. A worker:
 3. if nothing was found, exits when the pool is shutting down, otherwise
    blocks on the semaphore until more work arrives.
 
-Stealing keeps every thread busy when one worker is stuck on a long task
+Keeping subtasks local means a task that spawns children has them run next
+on the same thread, while the data they share is still in cache. Stealing
+keeps every thread busy when one worker is stuck on a long task
 while its own deque fills up. On destruction the pool sets `shutdown_`,
 releases one permit per thread, and joins every worker; tasks already
 queued still run, while `submit()` calls made after shutdown starts are

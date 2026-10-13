@@ -16,6 +16,10 @@ namespace {
 // Tasks must not throw; see ThreadPool::submit()
 void invoke_task(Task &task) noexcept { task(); }
 
+// The Worker whose thread is currently running, or nullptr off-pool. Lets
+// submit() keep subtasks on the spawning worker's deque.
+thread_local Worker *tls_worker = nullptr;
+
 } // namespace
 
 void WorkStealingDeque::push(Task task) {
@@ -46,6 +50,7 @@ bool WorkStealingDeque::try_steal(Task &task) {
 }
 
 void Worker::run() {
+  tls_worker = this;
   while (true) {
     Task task;
     if (local_deque.try_pop(task)) {
@@ -110,8 +115,11 @@ void ThreadPool::submit(Task task) {
     return;
   }
 
+  // Subtasks go to the submitting worker's own deque
   Worker *worker =
-      workers_[round_robin_idx_.fetch_add(1) % num_workers()].get();
+      (tls_worker != nullptr && tls_worker->pool == this)
+          ? tls_worker
+          : workers_[round_robin_idx_.fetch_add(1) % num_workers()].get();
   worker->local_deque.push(std::move(task));
   wake_signal_.release();
 }
