@@ -1,6 +1,7 @@
 #include "inference_srv/inference_srv.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
@@ -46,6 +47,27 @@ std::string response_to_string(const inference_srv::Response &response) {
   return msg + '\n';
 }
 
+std::string_view second_token(std::string_view line) {
+  auto tokens = line | std::views::split(' ') |
+                std::views::filter([](auto &&r) { return !r.empty(); });
+  auto it = std::ranges::next(tokens.begin(), 1, tokens.end());
+  if (it == tokens.end()) {
+    return {};
+  }
+  return std::string_view((*it).begin(), (*it).end());
+}
+
+std::string err_reply(std::string_view client_id_token,
+                      std::string_view reason) {
+  std::uint64_t client_id = 0;
+  const char *last = client_id_token.data() + client_id_token.size();
+  auto [end, ec] = std::from_chars(client_id_token.data(), last, client_id);
+  if (client_id_token.empty() || ec != std::errc{} || end != last) {
+    return std::format("ERR - {}\n", reason);
+  }
+  return std::format("ERR {} {}\n", client_id, reason);
+}
+
 } // namespace
 
 int main() {
@@ -85,8 +107,9 @@ int main() {
             engine.run_batch(batch, responses);
           } catch (const std::exception &) {
             for (const inference_srv::Request &request : batch) {
-              loop.queue_task([conn = request.conn] {
-                conn->send("ERR engine failure\n");
+              loop.queue_task([conn = request.conn,
+                               client_id = request.client_id] {
+                conn->send(std::format("ERR {} engine failure\n", client_id));
               });
             }
             return;
@@ -114,7 +137,8 @@ int main() {
   server->set_message_callback([&](const loopnet::TcpConnectionPtr &conn,
                                    loopnet::Buffer &buffer) {
     //   request:  INFER <client_id> <f1> <f2> ... <fn>\n
-    //   response:    OK <client_id> <o1> ... <on>\n   or   ERR <reason>\n
+    //   response: OK <client_id> <o1> ... <on>\n
+    //         or: ERR <client_id> <reason>\n   ("-" if no valid client_id)
 
     while (true) {
       std::string_view text = buffer.peek();
@@ -122,13 +146,15 @@ int main() {
       if (len == std::string::npos) {
         break;
       }
+      std::string_view line = text.substr(0, len);
       if (len > kMaxLineBytes) {
+        std::string reply = err_reply(second_token(line), "request too large");
         buffer.consume(len + 1);
-        conn->send("ERR request too large\n");
+        conn->send(reply);
         continue;
       }
 
-      auto tokens = (text.substr(0, len) | std::views::split(' ') |
+      auto tokens = (line | std::views::split(' ') |
                      std::views::filter([](auto &&r) { return !r.empty(); }) |
                      std::views::transform([](auto &&r) {
                        return std::string(r.begin(), r.end());
@@ -137,8 +163,10 @@ int main() {
 
       buffer.consume(len + 1);
 
+      std::string_view client_id_token =
+          tokens.size() > 1 ? std::string_view(tokens[1]) : std::string_view();
       if (tokens.size() <= 2 || tokens[0] != "INFER") {
-        conn->send("ERR invalid request\n");
+        conn->send(err_reply(client_id_token, "invalid request"));
         continue;
       }
 
@@ -151,16 +179,18 @@ int main() {
         }
 
         if (!batching_queue.submit(std::move(request))) {
-          conn->send("ERR busy\n");
+          conn->send(err_reply(client_id_token, "busy"));
         }
       } catch (const std::exception &) {
-        conn->send("ERR invalid request\n");
+        conn->send(err_reply(client_id_token, "invalid request"));
         continue;
       }
     }
     if (buffer.readable_bytes() > kMaxLineBytes) {
+      std::string reply =
+          err_reply(second_token(buffer.peek()), "request too large");
       buffer.consume(buffer.readable_bytes());
-      conn->send("ERR request too large\n");
+      conn->send(reply);
     }
   });
 
