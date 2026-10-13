@@ -15,13 +15,13 @@ public:
 
   explicit Channel(EventLoop &loop, int fd) : loop_{loop}, fd_{fd} {}
 
-  int fd() const { return fd_; }
-  int events() const { return events_; }
-
   void set_revents(int revents) { revents_ = revents; }
   void set_read_callback(EventCallback cb) { read_callback_ = std::move(cb); };
   void set_write_callback(EventCallback cb) {
     write_callback_ = std::move(cb);
+  };
+  void set_close_callback(EventCallback cb) {
+    close_callback_ = std::move(cb);
   };
 
   void enable_reading() {
@@ -44,12 +44,23 @@ public:
   }
 
   void handle_event() {
-    // errors and hangups surface through the read path (recv returns 0 or -1)
+    // poll reports errors and hangups even when not requested; a hangup with
+    // data still pending is left to the read path to drain first
+    bool closing = (revents_ & (POLLERR | POLLNVAL)) != 0 ||
+                   (revents_ & (POLLHUP | POLLIN)) == POLLHUP;
+    if (closing && close_callback_) {
+      close_callback_();
+      return;
+    }
+    // without a close handler they surface through the read path instead
     if ((revents_ & (POLLIN | POLLERR | POLLHUP)) != 0 && read_callback_)
       read_callback_();
     if ((revents_ & POLLOUT) != 0 && write_callback_)
       write_callback_();
   }
+
+  int fd() const { return fd_; }
+  int events() const { return events_; }
 
 private:
   void update() { loop_.update_channel(this); }
@@ -57,7 +68,7 @@ private:
   EventLoop &loop_;
   int fd_;
   int events_ = 0, revents_ = 0;
-  EventCallback read_callback_, write_callback_;
+  EventCallback read_callback_, write_callback_, close_callback_;
 };
 
 } // namespace loopnet

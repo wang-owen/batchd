@@ -15,6 +15,10 @@ TcpConnection::TcpConnection(EventLoop &loop, int client_fd)
     : channel_{loop, client_fd} {
   channel_.set_read_callback([this] { handle_read(); });
   channel_.set_write_callback([this] { handle_write(); });
+  channel_.set_close_callback([this] {
+    if (!closed_)
+      handle_close();
+  });
 }
 
 TcpConnection::~TcpConnection() { ::close(channel_.fd()); }
@@ -36,12 +40,11 @@ void TcpConnection::handle_read() {
     message_callback_(shared_from_this(), in_buffer_);
   } else if (bytes_received == 0) {
     // peer finished sending (half-close); flush pending output before closing
-    if (read_closed_ || out_buffer_.empty()) {
+    read_closed_ = true;
+    if (out_buffer_.empty())
       handle_close();
-    } else {
-      read_closed_ = true;
+    else
       channel_.disable_reading();
-    }
   } else if (errno != EAGAIN && errno != EINTR) {
     handle_close();
   }
@@ -55,17 +58,17 @@ void TcpConnection::handle_write() {
   // instead
   ssize_t bytes_sent =
       ::send(channel_.fd(), data.data(), data.size(), MSG_NOSIGNAL);
-  if (bytes_sent >= 0) {
-    out_buffer_.consume(bytes_sent);
-  } else {
+  if (bytes_sent < 0) {
     if (errno != EAGAIN && errno != EINTR)
       handle_close();
     return;
   }
+  out_buffer_.consume(bytes_sent);
   if (out_buffer_.empty()) {
-    channel_.disable_writing();
     if (read_closed_)
       handle_close();
+    else
+      channel_.disable_writing();
   }
 }
 
