@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <mutex>
@@ -85,7 +86,8 @@ void EventLoop::queue_task(Task t) {
 
 void EventLoop::wakeup() {
   char one = 1;
-  (void)::write(wakeup_pipe_[1], &one, 1);
+  [[maybe_unused]] ssize_t n = ::write(wakeup_pipe_[1], &one, 1);
+  assert(n == 1 || errno == EAGAIN);
 }
 
 } // namespace loopnet
