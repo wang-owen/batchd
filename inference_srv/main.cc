@@ -1,212 +1,148 @@
 #include "inference_srv/inference_srv.h"
 
-#include <csignal>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include <array>
-#include <cerrno>
+#include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
-#include <cstring>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <format>
-#include <future>
 #include <iostream>
-#include <sstream>
+#include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
 #include <thread>
-#include <variant>
+#include <unistd.h>
+#include <utility>
 #include <vector>
 
-#include "netserver/fd_util.h"
-#include "netserver/netserver.h"
+#include "loopnet/buffer.h"
+#include "loopnet/callbacks.h"
+#include "loopnet/event_loop.h"
+#include "loopnet/tcp_connection.h" // IWYU pragma: keep
+#include "loopnet/tcp_server.h"
+#include "threadpool/thread_pool.h"
 
 namespace {
 
-constexpr std::size_t kBufferSize = 1024;
-constexpr std::size_t kMaxPendingSize = 64 * 1024;
-
-// Closes the wrapped descriptor on every exit path out of handle_client.
-class FdGuard {
-public:
-  explicit FdGuard(int fd) : fd_{fd} {}
-  ~FdGuard() {
-    if (fd_ != -1) {
-      ::close(fd_);
-    }
+std::string response_to_string(const inference_srv::Response &response) {
+  std::string msg = std::format("OK {}", response.client_id);
+  for (float f : response.output) {
+    msg += std::format(" {}", f);
   }
-  FdGuard(const FdGuard &) = delete;
-  FdGuard &operator=(const FdGuard &) = delete;
-
-private:
-  int fd_;
-};
-
-bool send_message(int client_fd, const std::string &message) {
-  std::size_t total_written = 0;
-  while (total_written < message.size()) {
-    ssize_t bytes_written = ::write(client_fd, message.data() + total_written,
-                                    message.size() - total_written);
-    if (bytes_written > 0) {
-      total_written += static_cast<std::size_t>(bytes_written);
-      continue;
-    }
-    if (bytes_written == -1 && errno == EINTR) {
-      continue;
-    }
-    std::cerr << std::format("Failed to write response to client fd {}: {}\n",
-                             client_fd, std::strerror(errno));
-    return false;
-  }
-  return true;
-}
-
-ssize_t read_some(int client_fd, char *buf, std::size_t len) {
-  while (true) {
-    ssize_t n = ::read(client_fd, buf, len);
-    if (n >= 0) {
-      return n;
-    }
-    if (errno == EINTR) {
-      continue;
-    }
-    std::cerr << std::format("Failed to read from client fd {}: {}\n",
-                             client_fd, std::strerror(errno));
-    return -1;
-  }
-}
-
-void handle_client(int client_fd, inference_srv::BatchingQueue &queue) {
-  FdGuard guard{client_fd};
-
-  auto execute = [&queue](std::string command)
-      -> std::variant<inference_srv::Response, std::string> {
-    std::string token;
-    std::vector<std::string> tokens;
-    std::istringstream iss{std::move(command)};
-    while (iss >> token) {
-      tokens.push_back(std::move(token));
-    }
-    if (tokens.empty()) {
-      std::string msg = "Empty input";
-      std::cerr << msg << '\n';
-      return msg;
-    }
-    if (tokens.front() != "INFER" || tokens.size() < 3) {
-      std::string msg = "Invalid command";
-      std::cerr << msg << '\n';
-      return msg;
-    }
-
-    inference_srv::Request request;
-    try {
-      request.id = queue.get_id();
-      request.client_id = std::stoull(tokens[1]);
-      for (std::size_t i = 2; i < tokens.size(); ++i) {
-        request.input.push_back(std::stof(tokens[i]));
-      }
-    } catch (const std::exception &e) {
-      // stoull/stof throw on non-numbers
-      std::string msg = std::format("Malformed request: {}", e.what());
-      std::cerr << msg << '\n';
-      return msg;
-    }
-
-    std::promise<inference_srv::Response> prom;
-    std::future<inference_srv::Response> fut = prom.get_future();
-    queue.submit(std::move(request), [&prom](inference_srv::Response response) {
-      prom.set_value(std::move(response));
-    });
-
-    return fut.get();
-  };
-
-  std::array<char, kBufferSize> buffer;
-  std::string pending;
-  ssize_t bytes_read;
-  while ((bytes_read = read_some(client_fd, buffer.data(), buffer.size())) >
-         0) {
-    pending.append(buffer.data(), static_cast<std::size_t>(bytes_read));
-
-    std::size_t newline_pos;
-    // INFER <id> <f1> <f2> ... <fn>\n
-    while ((newline_pos = pending.find('\n')) != std::string::npos) {
-      std::string command = pending.substr(0, newline_pos);
-      pending.erase(0, newline_pos + 1);
-
-      std::variant<inference_srv::Response, std::string> response_or =
-          execute(std::move(command));
-
-      if (std::string *ptr = std::get_if<std::string>(&response_or)) {
-        std::string message = std::format("ERR {}\n", *ptr);
-        if (!send_message(client_fd, message)) {
-          return;
-        }
-        continue;
-      }
-
-      inference_srv::Response response =
-          std::get<inference_srv::Response>(response_or);
-
-      // Write response back to client
-      std::string message = std::format("OK {}", response.client_id);
-      for (float f : response.output) {
-        message += std::format(" {}", f);
-      }
-      message += '\n';
-      if (!send_message(client_fd, message)) {
-        return;
-      }
-    }
-
-    if (pending.size() > kMaxPendingSize) {
-      std::cerr << std::format("Client fd {} exceeded max pending size.\n",
-                               client_fd);
-      return;
-    }
-  }
+  return msg + '\n';
 }
 
 } // namespace
 
 int main() {
-  static constexpr std::string kBindAddress = "127.0.0.1";
-  static constexpr std::uint16_t kPort = 9091;
-  static constexpr std::size_t kMaxBatchSize = 4;
+  // TODO: graceful shutdown that drains pending/in-flight requests and replies
+  // to clients instead of dropping them.
+  std::signal(SIGINT, [](int) { _exit(0); });
 
-  // Writing to a peer that has already hung up would otherwise raise SIGPIPE,
-  // whose default disposition kills the server.
+  constexpr std::string_view kBindAddress = "127.0.0.1";
+  constexpr std::uint16_t kPort = 9091;
+  constexpr std::size_t kMaxBatchSize = 4;
+  constexpr std::size_t kMaxLineBytes = 64 * 1024;
+  constexpr std::chrono::milliseconds kMaxWaitMs =
+      std::chrono::milliseconds(50);
+
+  // Prevent writing to a disconnected client from killing server
   std::signal(SIGPIPE, SIG_IGN);
 
-  inference_srv::InferenceEngine engine;
+  loopnet::EventLoop loop;
+  threadpool::ThreadPool pool(
+      std::max(2u, std::thread::hardware_concurrency()));
   inference_srv::BatchingQueue batching_queue(
-      kMaxBatchSize, std::chrono::milliseconds(50),
-      [&engine](const std::vector<inference_srv::Request> &batch,
-                std::vector<inference_srv::Response> &out) {
-        engine.run_batch(batch, out);
+      kMaxBatchSize, kMaxWaitMs,
+      [&loop, &pool](std::vector<inference_srv::Request> batch) {
+        // PERF: no cap on batches in flight; under overload the pool's queues
+        // grow without bound and batches flush half-empty.
+        pool.submit([&loop, batch = std::move(batch)] {
+          thread_local inference_srv::InferenceEngine engine;
+          std::vector<inference_srv::Response> responses;
+          try {
+            engine.run_batch(batch, responses);
+          } catch (const std::exception &) {
+            for (const inference_srv::Request &request : batch) {
+              loop.queue_task([conn = request.conn] {
+                conn->send("ERR engine failure\n");
+              });
+            }
+            return;
+          }
+
+          for (inference_srv::Response &response : responses) {
+            loop.queue_task([response = std::move(response)] {
+              response.conn->send(response_to_string(response));
+            });
+          }
+        });
       });
 
-  netserver::EventLoop event_loop;
-  netserver::Acceptor acceptor(&event_loop, kBindAddress, kPort);
-  acceptor.set_new_connection_callback([&](int client_fd) {
-    try {
-      netserver::fd_util::set_blocking(client_fd);
-      std::thread(handle_client, client_fd, std::ref(batching_queue)).detach();
-    } catch (const std::exception &e) {
-      // set_blocking throws std::system_error and the thread constructor throws
-      // once the process runs out of threads; this callback runs inside the
-      // event loop, so neither may escape.
-      std::cerr << std::format("Dropping connection on fd {}: {}\n", client_fd,
-                               e.what());
-      ::close(client_fd);
+  std::optional<loopnet::TcpServer> server;
+  try {
+    server.emplace(loop, std::string(kBindAddress), kPort);
+  } catch (const std::exception &e) {
+    std::cerr << std::format("Failed to listen on {}:{}: {}\n", kBindAddress,
+                             kPort, e.what());
+    return 1;
+  }
+
+  // Runs on the loop thread each time bytes arrive on a connection; `buffer`
+  // holds everything received on it that hasn't been consumed yet.
+  server->set_message_callback([&](const loopnet::TcpConnectionPtr &conn,
+                                   loopnet::Buffer &buffer) {
+    //   request:  INFER <client_id> <f1> <f2> ... <fn>\n
+    //   response:    OK <client_id> <o1> ... <on>\n   or   ERR <reason>\n
+
+    while (true) {
+      std::string_view text = buffer.peek();
+      std::size_t len = text.find('\n');
+      if (len == std::string::npos) {
+        break;
+      }
+      if (len > kMaxLineBytes) {
+        buffer.consume(len + 1);
+        conn->send("ERR request too large\n");
+        continue;
+      }
+
+      auto tokens = (text.substr(0, len) | std::views::split(' ') |
+                     std::views::filter([](auto &&r) { return !r.empty(); }) |
+                     std::views::transform([](auto &&r) {
+                       return std::string(r.begin(), r.end());
+                     })) |
+                    std::ranges::to<std::vector>();
+
+      buffer.consume(len + 1);
+
+      if (tokens.size() <= 2 || tokens[0] != "INFER") {
+        conn->send("ERR invalid request\n");
+        continue;
+      }
+
+      try {
+        inference_srv::Request request{.id = batching_queue.get_id(),
+                                       .client_id = std::stoull(tokens[1]),
+                                       .conn = conn};
+        for (std::size_t i = 2; i < tokens.size(); ++i) {
+          request.input.push_back(std::stof(tokens[i]));
+        }
+        batching_queue.submit(std::move(request));
+      } catch (const std::exception &) {
+        conn->send("ERR invalid request\n");
+        continue;
+      }
+    }
+    if (buffer.readable_bytes() > kMaxLineBytes) {
+      buffer.consume(buffer.readable_bytes());
+      conn->send("ERR request too large\n");
     }
   });
 
-  if (!acceptor.start()) {
-    std::cerr << std::format("Failed to listen on {}:{}.\n", kBindAddress,
-                             kPort);
-    return 1;
-  }
-  event_loop.run();
+  server->start();
+  loop.start();
 }
