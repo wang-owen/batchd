@@ -85,7 +85,7 @@ void EventLoop::queue_task(Task t) {
 
 void EventLoop::wakeup() {
   char one = 1;
-  ::write(wakeup_pipe_[1], &one, 1);
+  (void)::write(wakeup_pipe_[1], &one, 1);
 }
 
 } // namespace loopnet
