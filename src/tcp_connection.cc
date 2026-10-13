@@ -34,9 +34,16 @@ void TcpConnection::handle_read() {
   if (bytes_received > 0) {
     in_buffer_.append({buffer, static_cast<std::size_t>(bytes_received)});
     message_callback_(shared_from_this(), in_buffer_);
-  } else if (bytes_received == 0 || (errno != EAGAIN && errno != EINTR)) {
-    closed_ = true;
-    close_callback_(shared_from_this());
+  } else if (bytes_received == 0) {
+    // peer finished sending (half-close); flush pending output before closing
+    if (read_closed_ || out_buffer_.empty()) {
+      handle_close();
+    } else {
+      read_closed_ = true;
+      channel_.disable_reading();
+    }
+  } else if (errno != EAGAIN && errno != EINTR) {
+    handle_close();
   }
 }
 
@@ -44,20 +51,27 @@ void TcpConnection::handle_write() {
   if (closed_)
     return;
   std::string_view data = out_buffer_.peek();
-  // sending to closed peer raises SIGINT; MSG_NOSIGNAL has it return -1 instead
+  // sending to closed peer raises SIGPIPE; MSG_NOSIGNAL has it return -1
+  // instead
   ssize_t bytes_sent =
       ::send(channel_.fd(), data.data(), data.size(), MSG_NOSIGNAL);
   if (bytes_sent >= 0) {
     out_buffer_.consume(bytes_sent);
   } else {
-    if (errno != EAGAIN && errno != EINTR) {
-      closed_ = true;
-      close_callback_(shared_from_this());
-    }
+    if (errno != EAGAIN && errno != EINTR)
+      handle_close();
     return;
   }
-  if (out_buffer_.empty())
+  if (out_buffer_.empty()) {
     channel_.disable_writing();
+    if (read_closed_)
+      handle_close();
+  }
+}
+
+void TcpConnection::handle_close() {
+  closed_ = true;
+  close_callback_(shared_from_this());
 }
 
 } // namespace loopnet

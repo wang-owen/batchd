@@ -34,13 +34,18 @@ public:
     events_ |= POLLOUT;
     update();
   }
+  void disable_reading() {
+    events_ &= ~POLLIN;
+    update();
+  }
   void disable_writing() {
     events_ &= ~POLLOUT;
     update();
   }
 
   void handle_event() {
-    if ((revents_ & POLLIN) != 0 && read_callback_)
+    // errors and hangups surface through the read path (recv returns 0 or -1)
+    if ((revents_ & (POLLIN | POLLERR | POLLHUP)) != 0 && read_callback_)
       read_callback_();
     if ((revents_ & POLLOUT) != 0 && write_callback_)
       write_callback_();

@@ -32,12 +32,14 @@ private:
 
   void handle_read();
   void handle_write();
+  void handle_close();
 
   Channel channel_;
   MessageCallback message_callback_;
   CloseCallback close_callback_;
   Buffer in_buffer_, out_buffer_;
   bool closed_ = false;
+  bool read_closed_ = false;
 };
 
 } // namespace loopnet
