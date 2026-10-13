@@ -25,7 +25,8 @@ protocol, served over [loopnet](https://github.com/wang-owen/loopnet).
 - **`main.cc`** -- a cache of 1024 entries behind a `loopnet::TcpServer`
   on `127.0.0.1:9090`. The single event-loop thread splits complete
   `\n`-terminated lines out of each connection's buffer, dispatches them,
-  and `send()`s the reply, so the cache needs no locking. `SIGINT` calls
+  and `send()`s each reply followed by `\n`, so the cache needs no
+  locking. `SIGINT` calls
   `EventLoop::stop()`, which sets an atomic flag and writes to the loop's
   wakeup pipe, and `main` returns.
 
@@ -48,8 +49,6 @@ This measures `LruCache` alone, not the network path.
 
 ## Limitations
 
-- Replies are sent with no terminator, so pipelined replies run together
-  (`OKhello(nil)`) and a client can't tell where one ends.
 - Values can't contain whitespace.
 - There's no limit on line length; an unterminated line grows the
   connection's input buffer without bound.

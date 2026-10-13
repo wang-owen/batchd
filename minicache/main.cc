@@ -53,7 +53,7 @@ int main() {
     while ((newline_pos = buffer.peek().find('\n')) != std::string_view::npos) {
       std::string command{buffer.peek().substr(0, newline_pos)};
       buffer.consume(newline_pos + 1);
-      conn->send(dispatcher.dispatch(command));
+      conn->send(dispatcher.dispatch(command) + '\n');
     }
   });
 
