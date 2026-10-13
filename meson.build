@@ -4,7 +4,7 @@ project(
     version: '0.1.0',
     meson_version: '>=1.3',
     default_options: [
-        'cpp_std=c++20',
+        'cpp_std=c++23',
         'buildtype=debugoptimized',
         'warning_level=1',
     ],
