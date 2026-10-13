@@ -3,15 +3,17 @@ minicache_lib = static_library(
     'minicache',
     files('src/command_dispatcher.cc', 'src/lru_cache.cc'),
     include_directories: minicache_inc,
-    dependencies: [netserver_dep],
 )
 minicache_dep = declare_dependency(
     link_with: minicache_lib,
     include_directories: minicache_inc,
-    dependencies: [netserver_dep],
 )
 
-executable('minicache_main', 'main.cc', dependencies: [minicache_dep])
+executable(
+    'minicache_main',
+    'main.cc',
+    dependencies: [minicache_dep, loopnet_dep],
+)
 
 if build_tests
     test(

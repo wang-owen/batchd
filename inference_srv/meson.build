@@ -1,5 +1,5 @@
 inference_srv_inc = include_directories('include')
-inference_srv_deps = [allocator_dep, threadpool_dep, netserver_dep]
+inference_srv_deps = [allocator_dep, threadpool_dep]
 inference_srv_lib = static_library(
     'inference_srv',
     files('src/batching_queue.cc', 'src/inference_engine.cc'),
@@ -12,7 +12,11 @@ inference_srv_dep = declare_dependency(
     dependencies: inference_srv_deps,
 )
 
-executable('inference_srv_main', 'main.cc', dependencies: [inference_srv_dep])
+executable(
+    'inference_srv_main',
+    'main.cc',
+    dependencies: [inference_srv_dep, loopnet_dep],
+)
 executable('inference_srv_client', 'client.cc')
 
 if build_tests

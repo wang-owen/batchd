@@ -5,12 +5,15 @@ before processing, instead of one at a time. Same idea as vLLM/Triton's
 dynamic batching. Uses [`allocator`](../allocator) directly for the
 batch input buffer; `BatchingQueue`'s worker thread follows the same
 mutex/condition_variable pattern as [`threadpool`](../threadpool)
-without calling into it.
+without calling into it. Networking is a
+[loopnet](https://github.com/wang-owen/loopnet) `TcpServer`; see
+[Serving](#serving) below.
 
 ## TODO
 
 - `threadpool_dep` is also an unused link dependency
-- Failures within a worker thread are not propagated upwards. If engine throws then `response.at` fails and worker terminates. `fut.get()` throws.
+- Failures within a worker thread are not propagated upwards. If engine throws then `response.at` fails and worker terminates, and the affected clients never receive a reply.
+- loopnet can't close a connection from the server side, so an oversized unterminated request is discarded with `ERR Request too large` rather than disconnecting the client.
 - a shutdown causes all pending tasks to be dropped
 
 ## Why batching helps
@@ -28,7 +31,7 @@ divided further.
 ## Architecture: request flow
 
 ```
- client thread(s)                BatchingQueue                    worker thread
+ loop thread                     BatchingQueue                    worker thread
       |                               |                                |
       |-- submit(req, callback) ----->| push {req,cb} onto pending_,   |
       |                               | notify_one()                  |
@@ -64,6 +67,19 @@ Two independent conditions can trigger a flush, whichever comes first:
 - **Time-triggered**: `max_wait_` elapses since `wait_until`'s deadline
   was set, even with a partial batch -- this bounds worst-case per-request
   latency when traffic is too sparse to fill a batch.
+
+## Serving
+
+`main.cc` runs a single `loopnet::EventLoop` thread. Its message callback
+parses each complete `INFER <id> <f1> ... <fn>\n` line and either replies
+`ERR ...` immediately or `submit()`s the request to the `BatchingQueue`
+without blocking. The response callback fires on the queue's worker
+thread, but `TcpConnection` may only be touched from the loop thread, so
+the callback formats the `OK ...` line and hands it back with
+`EventLoop::queue_task()`. It holds the connection by `weak_ptr` in case
+the client disconnects before its batch completes. A client may pipeline
+several requests on one connection. Replies are not ordered relative to
+each other: an `ERR` is sent right away, while an `OK` waits for its batch.
 
 ## Layout
     include/inference_srv/  public headers (#include "inference_srv/...")

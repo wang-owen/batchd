@@ -1,7 +1,7 @@
 # minicache
 
 Networked key-value store (mini Redis) with a text protocol and LRU
-eviction, built on top of [`netserver`](../netserver).
+eviction, built on top of [loopnet](https://github.com/wang-owen/loopnet).
 
 ## Layout
     include/minicache/  public headers (#include "minicache/...")
@@ -15,18 +15,12 @@ eviction, built on top of [`netserver`](../netserver).
 (`std::list` + `std::unordered_map`, front = most-recently-used).
 `CommandDispatcher` parses `SET`/`GET`/`DEL` lines and returns `OK`,
 the value, `(nil)` on a GET miss, or an `ERR ...` string for malformed
-or unrecognized commands. `main.cc` wires both into `netserver`'s
-`EventLoop`/`Acceptor`: the reactor accepts connections non-blockingly,
-and each accepted fd is handed to a detached thread running a blocking
-`read()`/`send()` `handle_client()` loop — one thread per connection
-rather than one connection at a time. Since `LruCache`/
-`CommandDispatcher` aren't internally synchronized, `dispatcher.dispatch()`
-calls are serialized across connection threads with a `std::mutex` in
-`main.cc`. `SIGINT` triggers a graceful shutdown via `EventLoop::stop()`
-(the same self-pipe wakeup mechanism `netserver` uses elsewhere).
-
-Note: accepted sockets inherit `O_NONBLOCK` from the listening socket on
-some platforms (observed on macOS/BSD; not on Linux), which would silently
-turn `handle_client()`'s blocking `read()` into spurious `EAGAIN` errors —
-`main.cc` explicitly restores blocking mode on each accepted fd before
-handing it to its thread.
+or unrecognized commands. `main.cc` wires the dispatcher into a
+`loopnet::TcpServer`: every connection is non-blocking and serviced by the
+single event-loop thread, whose message callback splits complete
+`\n`-terminated lines out of the connection's input buffer and replies with
+`TcpConnection::send()`. Because all dispatching happens on that one
+thread, `LruCache`/`CommandDispatcher` need no locking despite not being
+internally synchronized. `SIGINT` triggers a graceful shutdown via
+`EventLoop::stop()`, which only sets a flag and writes to the loop's
+self-pipe and so is safe to call from a signal handler.

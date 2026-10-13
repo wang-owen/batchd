@@ -2,7 +2,7 @@ project(
     'inference_server',
     'cpp',
     version: '0.1.0',
-    meson_version: '>=1.1',
+    meson_version: '>=1.3',
     default_options: [
         'cpp_std=c++20',
         'buildtype=debugoptimized',
@@ -22,6 +22,6 @@ build_benchmarks = catch2_dep.found() and get_option('benchmarks').allowed()
 
 subdir('allocator')
 subdir('threadpool')
-subdir('netserver')
+loopnet_dep = dependency('loopnet', default_options: ['tests=false'])
 subdir('minicache')
 subdir('inference_srv')
