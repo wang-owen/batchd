@@ -11,6 +11,7 @@
 #include <iostream>
 #include <optional>
 #include <ranges>
+#include <semaphore>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -26,6 +27,16 @@
 #include "threadpool/thread_pool.h"
 
 namespace {
+
+// Releases one slot upon destruction
+struct SlotRelease {
+  explicit SlotRelease(std::counting_semaphore<> &sem) : sem{sem} {}
+  ~SlotRelease() { sem.release(); }
+  SlotRelease(const SlotRelease &) = delete;
+  SlotRelease &operator=(const SlotRelease &) = delete;
+
+  std::counting_semaphore<> &sem;
+};
 
 std::string response_to_string(const inference_srv::Response &response) {
   std::string msg = std::format("OK {}", response.client_id);
@@ -54,14 +65,20 @@ int main() {
   std::signal(SIGPIPE, SIG_IGN);
 
   loopnet::EventLoop loop;
-  threadpool::ThreadPool pool(
-      std::max(2u, std::thread::hardware_concurrency()));
+
+  unsigned num_workers = std::max(2u, std::thread::hardware_concurrency());
+  std::counting_semaphore<> in_flight_slots{num_workers};
+  threadpool::ThreadPool pool(num_workers);
+
   inference_srv::BatchingQueue batching_queue(
       kMaxBatchSize, kMaxWaitMs, kMaxPendingRequests,
-      [&loop, &pool](std::vector<inference_srv::Request> batch) {
-        // PERF: no cap on batches in flight; under overload the pool's queues
-        // grow without bound and batches flush half-empty.
-        pool.submit([&loop, batch = std::move(batch)] {
+      [&loop, &pool,
+       &in_flight_slots](std::vector<inference_srv::Request> batch) {
+        // Blocks the batching thread until a worker is free, so the backlog
+        // waits in BatchingQueue (FIFO) instead of the pool's deques (LIFO).
+        in_flight_slots.acquire();
+        pool.submit([&loop, &in_flight_slots, batch = std::move(batch)] {
+          SlotRelease slot{in_flight_slots};
           thread_local inference_srv::InferenceEngine engine;
           std::vector<inference_srv::Response> responses;
           try {
