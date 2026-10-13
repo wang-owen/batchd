@@ -18,6 +18,11 @@ executable(
     dependencies: [inference_srv_dep, loopnet_dep],
 )
 executable('inference_srv_client', 'client.cc')
+executable(
+    'load_sweep',
+    'benchmarks/load_sweep.cc',
+    dependencies: [inference_srv_dep],
+)
 
 if build_tests
     test(
