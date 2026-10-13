@@ -41,7 +41,7 @@ if build_benchmarks
             'benchmarks/inference_bench.cc',
             dependencies: [inference_srv_dep, catch2_dep],
         ),
-        args: ['[!benchmark]', '--benchmark-samples', '5'],
+        args: ['[!benchmark]'],
         timeout: 1200,
     )
 endif

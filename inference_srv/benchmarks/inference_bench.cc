@@ -1,19 +1,21 @@
 #include "inference_srv/inference_srv.h"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <format>
+#include <iostream>
 #include <mutex>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
-#include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 
 namespace {
+
+using Millis = std::chrono::duration<double, std::milli>;
 
 std::vector<inference_srv::Request> make_requests(std::size_t count) {
   std::vector<inference_srv::Request> requests;
@@ -79,18 +81,64 @@ private:
   inference_srv::BatchingQueue queue_;
 };
 
+// Median wall time of `repetitions` calls to `fn`.
+template <typename Fn> Millis median_time(int repetitions, Fn &&fn) {
+  std::vector<Millis> samples;
+  for (int i = 0; i < repetitions; ++i) {
+    auto start = std::chrono::steady_clock::now();
+    fn();
+    samples.push_back(std::chrono::steady_clock::now() - start);
+  }
+  std::ranges::sort(samples);
+  return samples[samples.size() / 2];
+}
+
+// Total simulated latency of `count` requests split into full batches of
+// `max_batch_size` plus one partial batch, per InferenceEngine's cost model.
+Millis predicted_time(std::size_t count, std::size_t max_batch_size) {
+  using inference_srv::InferenceEngine;
+  Millis total = InferenceEngine::batch_latency(max_batch_size) *
+                 static_cast<double>(count / max_batch_size);
+  if (count % max_batch_size != 0) {
+    total += InferenceEngine::batch_latency(count % max_batch_size);
+  }
+  return total;
+}
+
 } // namespace
 
-TEST_CASE("inference_srv throughput: naive (one-at-a-time) vs batched",
+// Prints a table instead of using BENCHMARK so the measured speedup can be
+// shown next to the cost model's prediction.
+TEST_CASE("inference_srv throughput across max batch sizes",
           "[!benchmark][inference_srv]") {
-  const std::size_t count = GENERATE(10, 50, 200, 1000);
-  const auto requests = make_requests(count);
-  const std::string suffix = " | " + std::to_string(count) + " requests";
+  constexpr std::size_t kRequests = 200;
+  constexpr int kRepetitions = 5;
+  constexpr std::size_t kBatchSizes[] = {1, 2, 4, 8, 16, 32, 64};
+  const auto requests = make_requests(kRequests);
 
   inference_srv::InferenceEngine engine;
-  BENCHMARK("naive" + suffix) { return run_naive(engine, requests); };
+  const Millis naive =
+      median_time(kRepetitions, [&] { run_naive(engine, requests); });
+  const Millis predicted_naive = predicted_time(kRequests, 1);
 
-  BatchedRunner batched(/*max_batch_size=*/32, std::chrono::milliseconds(10),
-                        /*max_pending=*/count);
-  BENCHMARK("batched" + suffix) { return batched.run(requests); };
+  std::cout << std::format(
+      "{} requests, median of {} runs\n"
+      "{:>14} {:>11} {:>12} {:>9} {:>10}\n",
+      kRequests, kRepetitions, "max_batch_size", "time (ms)", "req/s",
+      "speedup", "predicted");
+  std::cout << std::format("{:>14} {:>11.2f} {:>12.0f} {:>8.2f}x {:>9.2f}x\n",
+                           "naive", naive.count(),
+                           kRequests / (naive.count() / 1000.0), 1.0, 1.0);
+
+  for (std::size_t max_batch_size : kBatchSizes) {
+    BatchedRunner batched(max_batch_size, std::chrono::milliseconds(10),
+                          /*max_pending=*/kRequests);
+    const Millis measured =
+        median_time(kRepetitions, [&] { batched.run(requests); });
+    std::cout << std::format(
+        "{:>14} {:>11.2f} {:>12.0f} {:>8.2f}x {:>9.2f}x\n", max_batch_size,
+        measured.count(), kRequests / (measured.count() / 1000.0),
+        naive / measured,
+        predicted_naive / predicted_time(kRequests, max_batch_size));
+  }
 }
