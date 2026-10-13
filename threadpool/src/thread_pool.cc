@@ -25,8 +25,10 @@ void WorkStealingDeque::push(Task task) {
 
 bool WorkStealingDeque::try_pop(Task &task) {
   std::lock_guard<std::mutex> lock(mtx_);
-  if (dq_.empty())
+  if (dq_.empty()) {
     return false;
+  }
+
   task = std::move(dq_.back());
   dq_.pop_back();
   return true;
@@ -34,8 +36,10 @@ bool WorkStealingDeque::try_pop(Task &task) {
 
 bool WorkStealingDeque::try_steal(Task &task) {
   std::lock_guard<std::mutex> lock(mtx_);
-  if (dq_.empty())
+  if (dq_.empty()) {
     return false;
+  }
+
   task = std::move(dq_.front());
   dq_.pop_front();
   return true;
@@ -47,8 +51,9 @@ void Worker::run() {
     if (local_deque.try_pop(task)) {
       invoke_task(task);
     } else if (!steal()) {
-      if (pool->shutdown_.load(std::memory_order_relaxed))
+      if (pool->shutdown_.load(std::memory_order_relaxed)) {
         break;
+      }
       pool->wake_signal_.acquire();
     }
   }
@@ -68,8 +73,9 @@ bool Worker::steal() const {
 }
 
 ThreadPool::ThreadPool(std::size_t num_workers) {
-  if (num_workers == 0)
+  if (num_workers == 0) {
     throw std::invalid_argument("ThreadPool requires at least one worker");
+  }
 
   workers_.reserve(num_workers);
   threads_.reserve(num_workers);

@@ -43,15 +43,17 @@ void BatchingQueue::worker_loop() {
       // BUG: pending_ requests dropped on shutdown without invoking callback;
       // caller hangs
       cv_.wait(lock, [this] { return stop_ || !pending_.empty(); });
-      if (stop_)
+      if (stop_) {
         break;
+      }
 
       auto deadline = pending_.front().enqueue_time + max_wait_;
       cv_.wait_until(lock, deadline, [this] {
         return stop_ || pending_.size() >= max_batch_size_;
       });
-      if (stop_)
+      if (stop_) {
         break;
+      }
 
       len =
           std::min(pending_.size(), static_cast<std::size_t>(max_batch_size_));

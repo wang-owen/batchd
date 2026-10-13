@@ -13,8 +13,9 @@ TEST_CASE("LruCache operations", "[!benchmark][minicache]") {
   constexpr std::size_t kCapacity = 1024;
   std::vector<std::string> keys;
   keys.reserve(2 * kCapacity);
-  for (std::size_t i = 0; i < 2 * kCapacity; ++i)
+  for (std::size_t i = 0; i < 2 * kCapacity; ++i) {
     keys.push_back("key" + std::to_string(i));
+  }
 
   minicache::LruCache cache(kCapacity);
   std::string out;

@@ -32,6 +32,7 @@ void *ArenaAllocator::allocate(std::size_t size, std::size_t alignment) {
   if (aligned == nullptr) {
     return nullptr;
   }
+
   offset_ = static_cast<std::byte *>(aligned) - base_ + size;
   return aligned;
 }

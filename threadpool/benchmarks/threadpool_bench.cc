@@ -15,8 +15,9 @@ constexpr int kTasks = 100'000;
 
 int run_serial(int task_count) {
   std::atomic<int> counter{0};
-  for (int i = 0; i < task_count; ++i)
+  for (int i = 0; i < task_count; ++i) {
     counter.fetch_add(1, std::memory_order_relaxed);
+  }
   return counter.load();
 }
 

@@ -29,10 +29,12 @@ SlabAllocator::SlabAllocator(std::size_t chunk_size, std::size_t chunk_count)
   if (chunk_count_ > SIZE_MAX / chunk_size_) {
     throw std::runtime_error("Requested chunk size and count too large.");
   }
+
   std::size_t total_bytes = chunk_size_ * chunk_count_;
   if (total_bytes == 0) {
     return;
   }
+
   pool_ = static_cast<std::byte *>(std::malloc(total_bytes));
   if (pool_ == nullptr) {
     throw std::runtime_error(std::format(
@@ -66,6 +68,7 @@ void SlabAllocator::deallocate(void *chunk) {
   if (chunk == nullptr) {
     return;
   }
+
   assert(chunk >= pool_ && chunk < pool_ + chunk_count_ * chunk_size_);
   assert((static_cast<std::byte *>(chunk) - pool_) % chunk_size_ == 0);
   assert(free_count_ < chunk_count_);
