@@ -1,5 +1,8 @@
 #include "minicache/lru_cache.h"
 
+#include <stdexcept>
+#include <string>
+
 #include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("ConstructsWithCapacity", "[lru_cache]") {

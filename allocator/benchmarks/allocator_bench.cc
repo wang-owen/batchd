@@ -1,10 +1,10 @@
 #include "allocator/arena_allocator.h"
 #include "allocator/slab_allocator.h"
 
+#include <cstdlib>
+
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
-
-#include <cstdlib>
 
 TEST_CASE("64-byte allocation", "[!benchmark][allocator]") {
   allocator::SlabAllocator slab(64, 1024);

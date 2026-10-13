@@ -1,12 +1,13 @@
 #include "threadpool/thread_pool.h"
 
-#include <catch2/benchmark/catch_benchmark.hpp>
-#include <catch2/catch_test_macros.hpp>
-
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <string>
 #include <thread>
+
+#include <catch2/benchmark/catch_benchmark.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 namespace {
 

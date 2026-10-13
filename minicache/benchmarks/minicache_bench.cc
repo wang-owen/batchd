@@ -1,11 +1,11 @@
 #include "minicache/minicache.h"
 
-#include <catch2/benchmark/catch_benchmark.hpp>
-#include <catch2/catch_test_macros.hpp>
-
 #include <cstddef>
 #include <string>
 #include <vector>
+
+#include <catch2/benchmark/catch_benchmark.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("LruCache operations", "[!benchmark][minicache]") {
   // Twice as many keys as the capacity, cycled in order, so steady state

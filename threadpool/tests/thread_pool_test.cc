@@ -1,12 +1,13 @@
 #include "threadpool/thread_pool.h"
 
 #include <atomic>
-#include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
+
+#include <catch2/catch_test_macros.hpp>
 
 namespace {
 
