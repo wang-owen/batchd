@@ -15,10 +15,16 @@ constexpr std::size_t kBatchArenaBytes = 4 * 1024 * 1024;
 
 constexpr std::chrono::milliseconds kBatchOverhead =
     std::chrono::milliseconds(5);
+constexpr std::chrono::milliseconds kPerItemCost = std::chrono::milliseconds(1);
 
 } // namespace
 
 InferenceEngine::InferenceEngine() : batch_arena_{kBatchArenaBytes} {}
+
+std::chrono::milliseconds
+InferenceEngine::batch_latency(std::size_t batch_size) {
+  return kBatchOverhead + kPerItemCost * static_cast<long long>(batch_size);
+}
 
 void InferenceEngine::run_batch(const std::vector<Request> &batch,
                                 std::vector<Response> &out_responses) {
@@ -49,8 +55,7 @@ void InferenceEngine::run_batch(const std::vector<Request> &batch,
   }
 
   // Simulate model latency
-  std::this_thread::sleep_for(kBatchOverhead +
-                              std::chrono::milliseconds(batch.size()));
+  std::this_thread::sleep_for(batch_latency(batch.size()));
 }
 
 } // namespace inference_srv
