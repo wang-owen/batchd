@@ -1,55 +1,33 @@
 # minicache
 
 In-memory key-value server with LRU eviction and a line-based text
-protocol, served over [loopnet](https://github.com/wang-owen/loopnet).
+protocol (`SET`, `GET`, `DEL`), served over
+[loopnet](https://github.com/wang-owen/loopnet) on `127.0.0.1:9090`.
 
-## How it works
+```
+SET key value   ->  OK
+GET key         ->  value, or (nil)
+DEL key         ->  OK, or FAIL
+```
 
-- **`LruCache`** -- `std::list` of key/value pairs (front =
-  most-recently-used) plus an `std::unordered_map` from key to list node,
-  giving O(1) average `get`/`put`/`remove`. `get` and `put` move the key to
-  the front; `put` on a full cache evicts the back entry first. Capacity 0
-  throws `std::invalid_argument`. Not thread-safe.
-- **`CommandDispatcher`** -- parses one line with `std::istringstream` and
-  runs it against an `LruCache`:
-
-  | Command         | Reply                                   |
-  |-----------------|-----------------------------------------|
-  | `SET key value` | `OK`                                    |
-  | `GET key`       | the value, or `(nil)` on a miss         |
-  | `DEL key`       | `OK`, or `FAIL` if the key wasn't there |
-
-  Missing arguments give `ERR wrong number of arguments for '<cmd>'`, and
-  anything else gives `ERR unknown command '<cmd>'`. Keys and values are
-  single whitespace-delimited tokens; extra tokens are ignored.
-- **`main.cc`** -- a cache of 1024 entries behind a `loopnet::TcpServer`
-  on `127.0.0.1:9090`. The single event-loop thread splits complete
-  `\n`-terminated lines out of each connection's buffer, dispatches them,
-  and `send()`s each reply followed by `\n`, so the cache needs no
-  locking. `SIGINT` calls
-  `EventLoop::stop()`, which sets an atomic flag and writes to the loop's
-  wakeup pipe, and `main` returns.
-
-## Build and run
-
-Built by the top-level Meson project (see the [root README](../README.md)).
+Everything runs on a single event-loop thread, so the cache needs no
+locking.
 
 ```sh
-./build/minicache/minicache_main     # listens on 127.0.0.1:9090
-meson test -C build minicache        # unit tests
-./build/minicache/minicache_bench '[!benchmark]'  # benchmark
+./build/minicache/minicache_main
+meson test -C build minicache
+./build/minicache/minicache_bench '[!benchmark]'
 ```
 
 ## Benchmark
 
-`minicache_bench` cycles a `put` + `get` pair over twice as many keys as
-the cache's 1024-entry capacity, so every `put` in steady state evicts.
-One pair averages 104 ns (`debugoptimized`, AppleClang 21, Apple M1 Pro).
-This measures `LruCache` alone, not the network path.
+| Operation                                | Mean   |
+|------------------------------------------|--------|
+| `put` + `get` (every `put` evicts)       | 104 ns |
+
+This measures the cache alone, not the network path.
 
 ## Limitations
 
-- Values can't contain whitespace.
-- There's no limit on line length; an unterminated line grows the
-  connection's input buffer without bound.
-- Port and capacity are compile-time constants in `main.cc`.
+- Keys and values can't contain whitespace.
+- Port and capacity are hard-coded in `main.cc`.
