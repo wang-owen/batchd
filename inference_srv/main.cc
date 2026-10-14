@@ -78,10 +78,13 @@ int main() {
   constexpr std::string_view kBindAddress = "127.0.0.1";
   constexpr std::uint16_t kPort = 9091;
   constexpr std::size_t kMaxBatchSize = 4;
-  constexpr std::size_t kMaxPendingRequests = 440;
+  // Cap on pending requests, in rounds of one full batch per worker. Each
+  // round takes about one batch latency to drain, so under overload a full
+  // queue adds roughly kBacklogRounds * batch_latency(kMaxBatchSize) of wait.
+  constexpr std::size_t kBacklogRounds = 5;
   constexpr std::size_t kMaxLineBytes = 64 * 1024;
   constexpr std::chrono::milliseconds kMaxWaitMs =
-      std::chrono::milliseconds(50);
+      std::chrono::milliseconds(5);
 
   // Prevent writing to a disconnected client from killing server
   std::signal(SIGPIPE, SIG_IGN);
@@ -91,9 +94,10 @@ int main() {
   unsigned num_workers = std::max(2u, std::thread::hardware_concurrency());
   std::counting_semaphore<> in_flight_slots{num_workers};
   threadpool::ThreadPool pool(num_workers);
+  const std::size_t max_pending = num_workers * kMaxBatchSize * kBacklogRounds;
 
   inference_srv::BatchingQueue batching_queue(
-      kMaxBatchSize, kMaxWaitMs, kMaxPendingRequests,
+      kMaxBatchSize, kMaxWaitMs, max_pending,
       [&loop, &pool,
        &in_flight_slots](std::vector<inference_srv::Request> batch) {
         // Blocks the batching thread until a worker is free, so the backlog

@@ -34,8 +34,10 @@ batches, and [loopnet](https://github.com/wang-owen/loopnet) for TCP.
   `std::runtime_error` if a batch's inputs don't fit in the arena.
 - **`main.cc`** -- one `loopnet::EventLoop` thread, a `ThreadPool` of
   `max(2, hardware_concurrency())` workers, and a `BatchingQueue` with
-  `max_batch_size=4`, `max_wait=50ms`, `max_pending=440`. The handler
-  takes one of `num_workers` permits from a `std::counting_semaphore`
+  `max_batch_size=4`, `max_wait=5ms`, and
+  `max_pending = num_workers * max_batch_size * 5` (200 on 10 cores):
+  five rounds of one full batch per worker, about 55 ms of queueing once
+  the queue is full. The handler takes one of `num_workers` permits from a `std::counting_semaphore`
   before submitting the batch to the pool, and the task returns it, so at
   most one batch per worker is in flight. Once every worker is busy the
   backlog waits in `BatchingQueue` (FIFO) rather than the pool's deques
@@ -152,5 +154,5 @@ latency.
 - Parsing uses `std::stoull`/`std::stof`, which accept a valid prefix:
   `1.5x` is read as 1.5, `12abc` as client id 12, `-1` wraps to
   18446744073709551615, and `nan`/`inf` are accepted as inputs.
-- Port, batch size, max wait and queue cap are compile-time constants in
-  `main.cc`.
+- Port, batch size, max wait and the queue cap's backlog rounds are
+  compile-time constants in `main.cc`.

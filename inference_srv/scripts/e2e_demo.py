@@ -163,7 +163,7 @@ class Demo:
 
     def disconnect_before_reply(self):
         # Close right after sending, before any batch can finish (the server
-        # waits up to 50 ms to fill a batch). SO_LINGER 0 makes the close an
+        # waits up to 5 ms to fill a batch). SO_LINGER 0 makes the close an
         # RST, so the server's later send hits a reset connection.
         for linger in (False, True):
             for i in range(10):
