@@ -45,6 +45,8 @@ void TcpConnection::handle_read() {
     message_callback_(shared_from_this(), in_buffer_);
   } else if (bytes_received == 0) {
     // peer finished sending (half-close); flush pending output before closing
+    // TODO: replies not yet queued (async handlers) are dropped; track
+    // outstanding requests via hold()/release() and close only at zero
     read_closed_ = true;
     if (out_buffer_.empty()) {
       handle_close();
