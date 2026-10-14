@@ -1,14 +1,27 @@
 # loopnet
 
-A small single-threaded reactor-style TCP networking library in C++23, built on `poll(2)`.
+A small single-threaded, reactor-style TCP server library in C++23, built on `poll(2)`.
 
-## Components
+## Usage
 
-- `EventLoop` — runs the poll loop and supports cross-thread task queuing with a pipe-based wakeup
-- `Channel` / `Poller` — fd event registration and dispatch
-- `Acceptor` — non-blocking listening socket
-- `TcpConnection` / `TcpServer` — connection lifecycle with message and close callbacks
-- `Buffer` — byte buffer for reads and writes
+```cpp
+#include "loopnet/event_loop.h"
+#include "loopnet/tcp_connection.h"
+#include "loopnet/tcp_server.h"
+
+int main() {
+  loopnet::EventLoop loop;
+  loopnet::TcpServer server{loop, "127.0.0.1", 9090};
+
+  server.set_message_callback(
+      [](const loopnet::TcpConnectionPtr &conn, loopnet::Buffer &buf) {
+        conn->send(buf.retrieve(buf.readable_bytes())); // echo
+      });
+
+  server.start();
+  loop.start(); // blocks until loop.stop()
+}
+```
 
 ## Build
 
@@ -19,11 +32,11 @@ meson setup build
 meson compile -C build
 ```
 
-Pass `-Dtests=false` to skip fetching Catch2.
+This produces the static library `libloopnet.a` and the demo binary `loopnet_server`. Catch2 is fetched for tests by default; pass `-Dtests=false` to skip it.
 
-## Run
+## Run the demo
 
-`loopnet_server` listens on `127.0.0.1:9090` and prints each message it receives:
+`loopnet_server` listens on `127.0.0.1:9090`, prints each message it receives and replies with `ACK`:
 
 ```sh
 ./build/loopnet_server
