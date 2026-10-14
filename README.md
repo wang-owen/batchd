@@ -1,6 +1,6 @@
 # inference-server
 
-C++23 building blocks for a batching inference server, plus two servers
+C++23 building blocks for a batching inference server, plus the server
 built from them. Networking comes from
 [loopnet](https://github.com/wang-owen/loopnet), a small single-threaded
 TCP library. The "inference" is a stub that simulates model latency.
@@ -9,7 +9,6 @@ TCP library. The "inference" is a stub that simulates model latency.
 |---|---|
 | [`allocator/`](allocator) | Arena and slab allocators |
 | [`threadpool/`](threadpool) | Work-stealing thread pool |
-| [`minicache/`](minicache) | LRU key-value server |
 | [`inference_srv/`](inference_srv) | Batching inference server |
 
 ## Build
