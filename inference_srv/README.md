@@ -136,6 +136,11 @@ latency.
 
 ## Limitations
 
+- The stub model sleeps instead of computing, so concurrent batches don't
+  compete for CPU and each worker acts as an independent model replica
+  (10 on an M1 Pro in `main.cc`, 4 in the load sweep). Copies sharing one
+  GPU would slow each other down, so these numbers overstate what N
+  replicas on one device would reach.
 - Shutdown drops every request still pending in `BatchingQueue` without
   handing it to the handler, and `SIGINT` calls `_exit(0)`, so in-flight
   clients never get a reply.
