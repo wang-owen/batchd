@@ -1,0 +1,6 @@
+/build*/
+/subprojects/*/
+/subprojects/packagecache/
+!/subprojects/*.wrap
+compile_commands.json
+.cache/
