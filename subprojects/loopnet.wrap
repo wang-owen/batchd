@@ -1,7 +1,0 @@
-[wrap-git]
-url = https://github.com/wang-owen/loopnet.git
-revision = 9f71d9cb39b949e85f073fdf721a570231111aa7
-depth = 1
-
-[provide]
-loopnet = loopnet_dep

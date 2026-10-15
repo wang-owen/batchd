@@ -22,5 +22,5 @@ build_benchmarks = catch2_dep.found() and get_option('benchmarks').allowed()
 
 subdir('allocator')
 subdir('threadpool')
-loopnet_dep = dependency('loopnet', default_options: ['tests=false'])
+subdir('loopnet')
 subdir('inference_srv')

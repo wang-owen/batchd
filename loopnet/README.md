@@ -1,6 +1,6 @@
 # loopnet
 
-A small single-threaded, reactor-style TCP server library in C++23, built on `poll(2)`.
+A small single-threaded, reactor-style TCP server library built on `poll(2)`.
 
 ## Usage
 
@@ -23,22 +23,11 @@ int main() {
 }
 ```
 
-## Build
-
-Requires Meson ≥ 1.3 and a C++23 compiler.
-
-```sh
-meson setup build
-meson compile -C build
-```
-
-This produces the static library `libloopnet.a` and the demo binary `loopnet_server`. Catch2 is fetched for tests by default; pass `-Dtests=false` to skip it.
-
-## Run the demo
+## Demo
 
 `loopnet_server` listens on `127.0.0.1:9090`, prints each message it receives and replies with `ACK`:
 
 ```sh
-./build/loopnet_server
+./build/loopnet/loopnet_server
 echo hello | nc 127.0.0.1 9090
 ```
