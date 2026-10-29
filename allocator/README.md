@@ -4,7 +4,7 @@ Two fixed-capacity, single-threaded allocators:
 
 - **`ArenaAllocator`** -- bump allocator for objects that share one
   lifetime; everything is freed at once with `reset()`. Used for per-batch
-  scratch memory in `inference_srv`.
+  scratch memory in `batchd`.
 - **`SlabAllocator`** -- pool of same-size chunks with O(1) allocate and
   free.
 

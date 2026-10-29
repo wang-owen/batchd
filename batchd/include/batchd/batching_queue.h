@@ -11,9 +11,9 @@
 #include <thread>
 #include <vector>
 
-#include "inference_srv/request.h"
+#include "batchd/request.h"
 
-namespace inference_srv {
+namespace batchd {
 
 using Clock = std::chrono::steady_clock;
 
@@ -59,4 +59,4 @@ private:
   std::thread worker_thread_;
 };
 
-} // namespace inference_srv
+} // namespace batchd

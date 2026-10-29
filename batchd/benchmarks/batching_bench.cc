@@ -1,4 +1,4 @@
-#include "inference_srv/inference_srv.h"
+#include "batchd/batchd.h"
 
 #include <algorithm>
 #include <chrono>
@@ -17,8 +17,8 @@ namespace {
 
 using Millis = std::chrono::duration<double, std::milli>;
 
-std::vector<inference_srv::Request> make_requests(std::size_t count) {
-  std::vector<inference_srv::Request> requests;
+std::vector<batchd::Request> make_requests(std::size_t count) {
+  std::vector<batchd::Request> requests;
   requests.reserve(count);
   for (std::uint64_t i = 0; i < count; ++i) {
     requests.push_back({.id = i, .input = {1.0f, 2.0f, 3.0f}});
@@ -27,12 +27,12 @@ std::vector<inference_srv::Request> make_requests(std::size_t count) {
 }
 
 // Baseline: process one request at a time, each as its own "batch" of 1
-std::size_t run_naive(inference_srv::InferenceEngine &engine,
-                      const std::vector<inference_srv::Request> &requests) {
-  std::vector<inference_srv::Response> responses;
+std::size_t run_naive(batchd::InferenceEngine &engine,
+                      const std::vector<batchd::Request> &requests) {
+  std::vector<batchd::Response> responses;
   std::size_t total = 0;
   for (const auto &req : requests) {
-    std::vector<inference_srv::Request> single{req};
+    std::vector<batchd::Request> single{req};
     engine.run_batch(single, responses);
     total += responses.size();
   }
@@ -49,14 +49,14 @@ public:
   BatchedRunner(std::size_t max_batch_size, std::chrono::milliseconds max_wait,
                 std::size_t max_pending)
       : queue_(max_batch_size, max_wait, max_pending,
-               [this](const std::vector<inference_srv::Request> &batch) {
+               [this](const std::vector<batchd::Request> &batch) {
                  engine_.run_batch(batch, responses_);
                  std::lock_guard<std::mutex> lock(mtx_);
                  received_ += responses_.size();
                  cv_.notify_all();
                }) {}
 
-  std::size_t run(const std::vector<inference_srv::Request> &requests) {
+  std::size_t run(const std::vector<batchd::Request> &requests) {
     {
       std::lock_guard<std::mutex> lock(mtx_);
       received_ = 0;
@@ -72,13 +72,13 @@ public:
   }
 
 private:
-  inference_srv::InferenceEngine engine_;
+  batchd::InferenceEngine engine_;
   // Only touched by the queue's worker thread.
-  std::vector<inference_srv::Response> responses_;
+  std::vector<batchd::Response> responses_;
   std::mutex mtx_;
   std::condition_variable cv_;
   std::size_t received_ = 0;
-  inference_srv::BatchingQueue queue_;
+  batchd::BatchingQueue queue_;
 };
 
 // Median wall time of `repetitions` calls to `fn`.
@@ -96,7 +96,7 @@ template <typename Fn> Millis median_time(int repetitions, Fn &&fn) {
 // Total simulated latency of `count` requests split into full batches of
 // `max_batch_size` plus one partial batch, per InferenceEngine's cost model.
 Millis predicted_time(std::size_t count, std::size_t max_batch_size) {
-  using inference_srv::InferenceEngine;
+  using batchd::InferenceEngine;
   Millis total = InferenceEngine::batch_latency(max_batch_size) *
                  static_cast<double>(count / max_batch_size);
   if (count % max_batch_size != 0) {
@@ -109,23 +109,21 @@ Millis predicted_time(std::size_t count, std::size_t max_batch_size) {
 
 // Prints a table instead of using BENCHMARK so the measured speedup can be
 // shown next to the cost model's prediction.
-TEST_CASE("inference_srv throughput across max batch sizes",
-          "[!benchmark][inference_srv]") {
+TEST_CASE("batchd throughput across max batch sizes", "[!benchmark][batchd]") {
   constexpr std::size_t kRequests = 200;
   constexpr int kRepetitions = 5;
   constexpr std::size_t kBatchSizes[] = {1, 2, 4, 8, 16, 32, 64};
   const auto requests = make_requests(kRequests);
 
-  inference_srv::InferenceEngine engine;
+  batchd::InferenceEngine engine;
   const Millis naive =
       median_time(kRepetitions, [&] { run_naive(engine, requests); });
   const Millis predicted_naive = predicted_time(kRequests, 1);
 
-  std::cout << std::format(
-      "{} requests, median of {} runs\n"
-      "{:>14} {:>11} {:>12} {:>9} {:>10}\n",
-      kRequests, kRepetitions, "max_batch_size", "time (ms)", "req/s",
-      "speedup", "predicted");
+  std::cout << std::format("{} requests, median of {} runs\n"
+                           "{:>14} {:>11} {:>12} {:>9} {:>10}\n",
+                           kRequests, kRepetitions, "max_batch_size",
+                           "time (ms)", "req/s", "speedup", "predicted");
   std::cout << std::format("{:>14} {:>11.2f} {:>12.0f} {:>8.2f}x {:>9.2f}x\n",
                            "naive", naive.count(),
                            kRequests / (naive.count() / 1000.0), 1.0, 1.0);

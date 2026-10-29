@@ -1,5 +1,5 @@
 project(
-    'inference_server',
+    'batchd',
     'cpp',
     version: '0.1.0',
     meson_version: '>=1.3',
@@ -23,4 +23,4 @@ build_benchmarks = catch2_dep.found() and get_option('benchmarks').allowed()
 subdir('allocator')
 subdir('threadpool')
 subdir('loopnet')
-subdir('inference_srv')
+subdir('batchd')

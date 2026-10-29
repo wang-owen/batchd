@@ -1,4 +1,4 @@
-#include "inference_srv/batching_queue.h"
+#include "batchd/batching_queue.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -9,8 +9,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-using inference_srv::BatchingQueue;
-using inference_srv::Request;
+using batchd::BatchingQueue;
+using batchd::Request;
 
 namespace {
 
@@ -33,8 +33,7 @@ public:
   // `timeout` -- used to assert something did NOT happen promptly.
   bool wait_for_at_least(std::size_t count, std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(mtx_);
-    return cv_.wait_for(lock, timeout,
-                        [&] { return request_count_ >= count; });
+    return cv_.wait_for(lock, timeout, [&] { return request_count_ >= count; });
   }
 
   std::vector<std::vector<Request>> snapshot() {
@@ -42,7 +41,7 @@ public:
     return batches_;
   }
 
-  inference_srv::BatchHandler handler() {
+  batchd::BatchHandler handler() {
     return [this](const std::vector<Request> &batch) { add(batch); };
   }
 
@@ -68,8 +67,7 @@ TEST_CASE("FullBatchTriggersBeforeMaxWaitElapses", "[batching_queue]") {
 
   BatchingQueue queue(kBatchSize, kMaxWait, kMaxPending, collector.handler());
   for (std::uint64_t id = 0; id < kBatchSize; ++id) {
-    REQUIRE(
-        queue.submit(Request{.id = id, .input = {static_cast<float>(id)}}));
+    REQUIRE(queue.submit(Request{.id = id, .input = {static_cast<float>(id)}}));
   }
 
   // If this only fired via the max_wait timeout, it wouldn't arrive for
@@ -103,8 +101,7 @@ TEST_CASE("DeliversRequestsToHandlerInSubmissionOrder", "[batching_queue]") {
 
   BatchingQueue queue(kBatchSize, kMaxWait, kMaxPending, collector.handler());
   for (std::uint64_t id = 0; id < kTotal; ++id) {
-    REQUIRE(
-        queue.submit(Request{.id = id, .input = {static_cast<float>(id)}}));
+    REQUIRE(queue.submit(Request{.id = id, .input = {static_cast<float>(id)}}));
   }
 
   REQUIRE(collector.wait_for_at_least(kTotal, std::chrono::milliseconds(500)));

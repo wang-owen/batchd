@@ -1,4 +1,4 @@
-# inference_srv
+# batchd
 
 Batching inference server. Incoming requests are grouped into batches,
 like Triton's dynamic batching, so the fixed per-call cost of the model is
@@ -34,12 +34,12 @@ Replies can arrive out of order; match them by `client_id`.
 ## Build and run
 
 ```sh
-./build/inference_srv/inference_srv_main      # server on 127.0.0.1:9091
-./build/inference_srv/inference_srv_client    # sends one request
-python3 inference_srv/scripts/e2e_demo.py     # end-to-end checks against the server
-meson test -C build inference_srv
-./build/inference_srv/inference_srv_bench '[!benchmark]'  # batch-size sweep
-inference_srv/scripts/load_sweep.sh out.csv   # load sweep (~10 min)
+./build/batchd/batchd                       # server on 127.0.0.1:9091
+./build/batchd/batchd_client                # sends one request
+python3 batchd/scripts/e2e_demo.py          # end-to-end checks against the server
+meson test -C build batchd
+./build/batchd/batchd_bench '[!benchmark]'  # batch-size sweep
+batchd/scripts/load_sweep.sh out.csv        # load sweep (~10 min)
 ```
 
 ## Benchmarks

@@ -1,4 +1,4 @@
-#include "inference_srv/inference_engine.h"
+#include "batchd/inference_engine.h"
 
 #include <algorithm>
 #include <chrono>
@@ -7,7 +7,7 @@
 #include <thread>
 #include <utility>
 
-namespace inference_srv {
+namespace batchd {
 
 namespace {
 
@@ -58,4 +58,4 @@ void InferenceEngine::run_batch(const std::vector<Request> &batch,
   std::this_thread::sleep_for(batch_latency(batch.size()));
 }
 
-} // namespace inference_srv
+} // namespace batchd

@@ -1,4 +1,4 @@
-#include "inference_srv/batching_queue.h"
+#include "batchd/batching_queue.h"
 
 #include <algorithm>
 #include <chrono>
@@ -7,7 +7,7 @@
 #include <thread>
 #include <utility>
 
-namespace inference_srv {
+namespace batchd {
 
 BatchingQueue::BatchingQueue(std::size_t max_batch_size,
                              std::chrono::milliseconds max_wait,
@@ -77,4 +77,4 @@ void BatchingQueue::worker_loop() {
   }
 }
 
-} // namespace inference_srv
+} // namespace batchd

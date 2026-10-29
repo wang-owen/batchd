@@ -5,9 +5,9 @@
 #include <vector>
 
 #include "allocator/arena_allocator.h"
-#include "inference_srv/request.h"
+#include "batchd/request.h"
 
-namespace inference_srv {
+namespace batchd {
 
 // Stub "model": no real inference
 class InferenceEngine {
@@ -25,4 +25,4 @@ private:
   allocator::ArenaAllocator batch_arena_;
 };
 
-} // namespace inference_srv
+} // namespace batchd

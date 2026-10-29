@@ -1,4 +1,4 @@
-#include "inference_srv/inference_srv.h"
+#include "batchd/batchd.h"
 
 #include <algorithm>
 #include <charconv>
@@ -39,7 +39,7 @@ struct SlotRelease {
   std::counting_semaphore<> &sem;
 };
 
-std::string response_to_string(const inference_srv::Response &response) {
+std::string response_to_string(const batchd::Response &response) {
   std::string msg = std::format("OK {}", response.client_id);
   for (float f : response.output) {
     msg += std::format(" {}", f);
@@ -83,8 +83,7 @@ int main() {
   // queue adds roughly kBacklogRounds * batch_latency(kMaxBatchSize) of wait.
   constexpr std::size_t kBacklogRounds = 5;
   constexpr std::size_t kMaxLineBytes = 64 * 1024;
-  constexpr std::chrono::milliseconds kMaxWaitMs =
-      std::chrono::milliseconds(5);
+  constexpr std::chrono::milliseconds kMaxWaitMs = std::chrono::milliseconds(5);
 
   // Prevent writing to a disconnected client from killing server
   std::signal(SIGPIPE, SIG_IGN);
@@ -96,21 +95,20 @@ int main() {
   threadpool::ThreadPool pool(num_workers);
   const std::size_t max_pending = num_workers * kMaxBatchSize * kBacklogRounds;
 
-  inference_srv::BatchingQueue batching_queue(
+  batchd::BatchingQueue batching_queue(
       kMaxBatchSize, kMaxWaitMs, max_pending,
-      [&loop, &pool,
-       &in_flight_slots](std::vector<inference_srv::Request> batch) {
+      [&loop, &pool, &in_flight_slots](std::vector<batchd::Request> batch) {
         // Blocks the batching thread until a worker is free, so the backlog
         // waits in BatchingQueue (FIFO) instead of the pool's deques (LIFO).
         in_flight_slots.acquire();
         pool.submit([&loop, &in_flight_slots, batch = std::move(batch)] {
           SlotRelease slot{in_flight_slots};
-          thread_local inference_srv::InferenceEngine engine;
-          std::vector<inference_srv::Response> responses;
+          thread_local batchd::InferenceEngine engine;
+          std::vector<batchd::Response> responses;
           try {
             engine.run_batch(batch, responses);
           } catch (const std::exception &) {
-            for (const inference_srv::Request &request : batch) {
+            for (const batchd::Request &request : batch) {
               loop.queue_task([conn = request.conn,
                                client_id = request.client_id] {
                 conn->send(std::format("ERR {} engine failure\n", client_id));
@@ -119,7 +117,7 @@ int main() {
             return;
           }
 
-          for (inference_srv::Response &response : responses) {
+          for (batchd::Response &response : responses) {
             loop.queue_task([response = std::move(response)] {
               response.conn->send(response_to_string(response));
             });
@@ -175,9 +173,9 @@ int main() {
       }
 
       try {
-        inference_srv::Request request{.id = batching_queue.get_id(),
-                                       .client_id = std::stoull(tokens[1]),
-                                       .conn = conn};
+        batchd::Request request{.id = batching_queue.get_id(),
+                                .client_id = std::stoull(tokens[1]),
+                                .conn = conn};
         for (std::size_t i = 2; i < tokens.size(); ++i) {
           request.input.push_back(std::stof(tokens[i]));
         }

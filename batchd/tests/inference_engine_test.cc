@@ -1,4 +1,4 @@
-#include "inference_srv/inference_engine.h"
+#include "batchd/inference_engine.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -7,9 +7,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-using inference_srv::InferenceEngine;
-using inference_srv::Request;
-using inference_srv::Response;
+using batchd::InferenceEngine;
+using batchd::Request;
+using batchd::Response;
 
 TEST_CASE("ConstructsCleanly", "[inference_engine]") {
   InferenceEngine engine;

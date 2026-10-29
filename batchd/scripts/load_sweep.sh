@@ -6,7 +6,7 @@
 # usage: load_sweep.sh [out.csv]
 #
 # Environment overrides:
-#   LOAD_SWEEP  path to the load_sweep binary (default: <repo>/build/inference_srv/load_sweep)
+#   LOAD_SWEEP  path to the load_sweep binary (default: <repo>/build/batchd/load_sweep)
 #   WORKERS     thread pool workers (default: 4)
 #   DURATION_S  seconds of offered load per run; requests = rate * DURATION_S (default: 3)
 #   RATES       space-separated offered rates in req/s
@@ -17,7 +17,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 
 out="${1:-load_sweep.csv}"
-load_sweep="${LOAD_SWEEP:-$repo_root/build/inference_srv/load_sweep}"
+load_sweep="${LOAD_SWEEP:-$repo_root/build/batchd/load_sweep}"
 workers="${WORKERS:-4}"
 duration_s="${DURATION_S:-3}"
 rates="${RATES:-100 200 400 600 800 1000 1500 2000 3000}"

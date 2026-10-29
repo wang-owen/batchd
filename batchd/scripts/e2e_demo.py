@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end demo against a running inference_srv_main.
+"""End-to-end demo against a running batchd.
 
 Exercises the line protocol:
 
@@ -9,8 +9,8 @@ Exercises the line protocol:
 Each check runs on its own connection and prints PASS/FAIL; the exit status
 is the number of failed checks. Start the server first:
 
-    build/inference_srv/inference_srv_main &
-    python3 inference_srv/scripts/e2e_demo.py
+    build/batchd/batchd &
+    python3 batchd/scripts/e2e_demo.py
 """
 
 import argparse
@@ -244,7 +244,7 @@ def main():
     try:
         demo.connect().close()
     except OSError as e:
-        print("cannot connect to {}:{}: {}. Is inference_srv_main running?".format(
+        print("cannot connect to {}:{}: {}. Is batchd running?".format(
             args.host, args.port, e), file=sys.stderr)
         return 1
 

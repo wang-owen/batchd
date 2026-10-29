@@ -5,7 +5,7 @@
 
 #include "loopnet/callbacks.h"
 
-namespace inference_srv {
+namespace batchd {
 
 struct Request {
   std::uint64_t id;
@@ -21,4 +21,4 @@ struct Response {
   std::vector<float> output;
 };
 
-} // namespace inference_srv
+} // namespace batchd

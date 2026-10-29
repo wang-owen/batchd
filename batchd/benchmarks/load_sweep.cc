@@ -1,4 +1,4 @@
-#include "inference_srv/inference_srv.h"
+#include "batchd/batchd.h"
 
 #include <algorithm>
 #include <atomic>
@@ -110,16 +110,16 @@ int main(int argc, char **argv) {
   {
     // Every request fits in pending_, so submit() never rejects and overload
     // shows up as latency rather than drops.
-    inference_srv::BatchingQueue queue(
+    batchd::BatchingQueue queue(
         opts.max_batch_size, opts.max_wait, /*max_pending=*/opts.requests,
-        [&](std::vector<inference_srv::Request> batch) {
+        [&](std::vector<batchd::Request> batch) {
           in_flight_slots.acquire();
           pool.submit([&, batch = std::move(batch)] {
-            thread_local inference_srv::InferenceEngine engine;
-            std::vector<inference_srv::Response> responses;
+            thread_local batchd::InferenceEngine engine;
+            std::vector<batchd::Response> responses;
             engine.run_batch(batch, responses);
             auto now = Clock::now();
-            for (const inference_srv::Response &response : responses) {
+            for (const batchd::Response &response : responses) {
               completed[response.id] = now;
             }
             batches.fetch_add(1, std::memory_order_relaxed);
@@ -150,7 +150,8 @@ int main(int argc, char **argv) {
     }
     std::ranges::sort(latencies);
     const auto last = *std::ranges::max_element(completed);
-    const double elapsed_s = std::chrono::duration<double>(last - start).count();
+    const double elapsed_s =
+        std::chrono::duration<double>(last - start).count();
     const double throughput = opts.requests / elapsed_s;
     const double mean_batch =
         static_cast<double>(opts.requests) / batches.load();
@@ -160,11 +161,10 @@ int main(int argc, char **argv) {
     if (opts.csv) {
       std::cout << "workers,max_batch_size,max_wait_ms,offered_rate,requests,"
                    "throughput,p50_ms,p99_ms,mean_batch_size\n";
-      std::cout << std::format("{},{},{},{},{},{:.1f},{:.2f},{:.2f},{:.2f}\n",
-                               opts.workers, opts.max_batch_size,
-                               opts.max_wait.count(), opts.rate, opts.requests,
-                               throughput, p50.count(), p99.count(),
-                               mean_batch);
+      std::cout << std::format(
+          "{},{},{},{},{},{:.1f},{:.2f},{:.2f},{:.2f}\n", opts.workers,
+          opts.max_batch_size, opts.max_wait.count(), opts.rate, opts.requests,
+          throughput, p50.count(), p99.count(), mean_batch);
     } else {
       std::cout << std::format(
           "workers={} max_batch_size={} max_wait={}ms rate={}/s requests={}\n"

@@ -1,4 +1,4 @@
-# inference-server
+# batchd
 
 C++23 building blocks for a batching inference server, plus the server
 built from them. The "inference" is a stub that simulates model latency.
@@ -8,7 +8,7 @@ built from them. The "inference" is a stub that simulates model latency.
 | [`allocator/`](allocator) | Arena and slab allocators |
 | [`threadpool/`](threadpool) | Work-stealing thread pool |
 | [`loopnet/`](loopnet) | Single-threaded reactor TCP library |
-| [`inference_srv/`](inference_srv) | Batching inference server |
+| [`batchd/`](batchd) | Batching inference server |
 
 ## Build
 
